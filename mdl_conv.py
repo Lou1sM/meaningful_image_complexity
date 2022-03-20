@@ -1,4 +1,5 @@
 import torch
+from PIL import Image
 from dl_utils.tensor_funcs import numpyify
 import sklearn.datasets as data
 import matplotlib.pyplot as plt
@@ -8,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 from torchvision.transforms import ToTensor
+from load_imagenette import load_rand_imagenette_val
 
 
 class ComplexityMeasurer():
@@ -20,7 +22,6 @@ class ComplexityMeasurer():
 
     def interpret(self):
         total_num_clusters = 0
-        print(f'\nim shape: {self.x.shape}')
         while True:
             num_clusters_at_this_level, dl = self.mdl_cluster()
             if self.verbose:
@@ -31,7 +32,7 @@ class ComplexityMeasurer():
             self.x = apply_random_conv_layer(self.x)
             if self.verbose:
                 print(f'applying cl to make im size {self.x.shape}')
-            if self.x.shape[0] < 4:
+            if self.x.shape[0]*self.x.shape[1] < 20:
                 return total_num_clusters
         return total_num_clusters
 
@@ -43,7 +44,8 @@ class ComplexityMeasurer():
     def log_model_prob(self,dpoint,cluster_label):
         pc = self.model.precisions_cholesky_[cluster_label]
         m = self.model.means_[cluster_label]
-        mahalanobis_distance = sqeuclidean(np.matmul(np.transpose(pc),(dpoint-m)))
+        #mahalanobis_distance = sqeuclidean(np.matmul(np.transpose(pc),(dpoint-m)))
+        mahalanobis_distance = np.linalg.norm(np.matmul(np.transpose(pc),(dpoint-m)))**2
         ml_in_nats = -0.5 * (3*np.log(2*np.pi) + mahalanobis_distance) + np.log(np.linalg.det(pc))
         return np.log2(np.e) * ml_in_nats
 
@@ -69,6 +71,7 @@ class ComplexityMeasurer():
             indices_len = N * np.log2(nc)
             neg_log_probs = -self.log_model_probs_for_dset(x)
             outliers = neg_log_probs>len_of_outlier
+            print('my way', neg_log_probs.sum().item(),'score way', self.model.score(x)*N*np.log2(np.e))
             residual_errors = neg_log_probs[~outliers].sum()
             len_outliers = len_of_outlier * outliers.sum()
             total_description_len = model_len + indices_len + residual_errors + len_outliers
@@ -101,13 +104,24 @@ def apply_random_conv_layer(x):
     return numpyify(torch_x.squeeze(0).transpose(0,2))
 
 sqeuclidean = lambda x: np.inner(x,x)
-blobs, _ = data.make_blobs(n_samples=500, centers=[(-0.75,2.25), (-.75,-.75),(2,-.75),(1.0, 2.0)], cluster_std=0.1)
-dset = torchvision.datasets.CIFAR10(root='/home/louis/datasets',download=True,train=True,transform=ToTensor())
-for i in range(10):
-    im = dset.data[i]/255
+dset = torchvision.datasets.CIFAR10(root='/home/louis/datasets',download=True,train=True)
+#dset = torchvision.datasets.ImageNet(root='/home/louis/datasets',split='val',download=True)
+#dset=torchvision.datasets.MNIST(root='/home/louis/datasets',train=False,download=True)
+all_assembly_idxs = []
+for i in range(1):
+    #im = numpyify(dset.data[i].unsqueeze(2))/255
+    #im = dset.data[i]/255
+    im = np.array(dset.data[i])/255
+    #im = np.resize(im,(224,224))
+    #im, label = load_rand_imagenette_val(True)
+    label = dset.targets[i]
+    #plt.imshow(im);plt.show()
     comp_meas = ComplexityMeasurer(im,ks=4,verbose=False)
-    assembly_num = comp_meas.interpret()
-    print(f'Assemby num is {assembly_num}')
+    assembly_idx = comp_meas.interpret()
+    print(f'Class: {label}\tAssemby num: {assembly_idx}')
+    all_assembly_idxs.append(assembly_idx)
+mean_assembly_idx = np.array(all_assembly_idxs).mean()
+print(f'Mean assembly idx: {mean_assembly_idx}')
 nonim = np.random.rand(*im.shape)*im.max()
 comp_meas = ComplexityMeasurer(nonim,ks=4,verbose=False)
 assembly_num = comp_meas.interpret()
