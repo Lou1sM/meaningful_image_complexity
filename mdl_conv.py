@@ -1,5 +1,4 @@
 import torch
-from math import erf
 import sklearn.datasets as data
 import matplotlib.pyplot as plt
 from sklearn.mixture import GaussianMixture as GMM
@@ -11,35 +10,36 @@ from torchvision.transforms import ToTensor
 
 
 class ComplexityMeasurer():
-    def __init__(self,x):
+    def __init__(self,x,ks):
         self.x = x
+        self.ks = ks
         self.get_smallest_increment(x)
         pass
 
     def interpret(self):
         total_num_clusters = 0
+        print(f'\nim shape: {self.x.shape}')
         while True:
             num_clusters_at_this_level, dl = self.mdl_cluster()
             print('num clusters at this level is', num_clusters_at_this_level)
-            if num_clusters_at_this_level == 1:
+            if num_clusters_at_this_level == 1 or self.x.shape[-1] < 3:
                 return total_num_clusters
             total_num_clusters += num_clusters_at_this_level
-            self.x = apply_random_conv_layer(self.x)
+            self.x = apply_random_conv_layer(self.x).detach()
             print(f'applying cl to make im size {self.x.shape}')
         return total_num_clusters
 
     def get_smallest_increment(self,x):
         sx = sorted(x.flatten())
         increments = [sx2-sx1 for sx1,sx2 in zip(sx[:-1],sx[1:])]
-        #self.prec = min([item for item in increments if item != 0])
-        self.prec = 0.1
+        self.prec = min([item for item in increments if item != 0])
+        #self.prec = 0.1
 
     def log_model_prob(self,dpoint,cluster_label):
         pc = self.model.precisions_cholesky_[cluster_label]
         m = self.model.means_[cluster_label]
         mahalanobis_distance = np.matmul(np.transpose(pc),(dpoint-m)).norm()**2
-        ml_in_nats = -0.5 * (3*np.log(2*np.pi) + np.matmul(np.transpose(pc),(dpoint-m)).norm()**2) + np.log(np.linalg.det(pc))
-        #ml_in_nats = erf((mahalanobis_distance + self.prec)/2**.5) - erf((mahalanobis_distance - self.prec)/2**.5)
+        ml_in_nats = -0.5 * (3*np.log(2*np.pi) + mahalanobis_distance) + np.log(np.linalg.det(pc))
         return np.log2(np.e) * ml_in_nats
 
     def log_model_probs_for_dset(self):
@@ -52,7 +52,7 @@ class ComplexityMeasurer():
         assert x.ndim == 2
         N,nz = x.shape
         len_of_each_cluster = nz + (nz*(nz+1)/2) * np.log2((x.max() - x.min())/self.prec)
-        len_of_outlier = nz * np.log2((x.max() - x.min())/self.prec)
+        len_of_outlier = nz * np.log2(x.max() - x.min())
         best_dl = np.inf
         best_nc = -1
         for nc in range(1,21):
@@ -60,16 +60,12 @@ class ComplexityMeasurer():
             self.cluster_labels = self.model.fit_predict(x)
             model_len = nc*(len_of_each_cluster)
             indices_len = N * np.log2(nc)
-            #error = -model.score(x) * N
-            log_probs = self.log_model_probs_for_dset()
-            residual_errors = -log_probs.sum()
-            outliers = -log_probs>len_of_outlier
-            #error_or_outlier_lens = torch_min(residual_errors,len_of_outlier).sum()
-            #residual_errors = residual_errors_[~outliers].sum()
-            #residual_errors = self.model.score(x) * N
+            neg_log_probs = -self.log_model_probs_for_dset()
+            outliers = neg_log_probs>len_of_outlier
+            residual_errors = neg_log_probs[~outliers].sum()
             len_outliers = len_of_outlier * outliers.sum()
             total_description_len = model_len + indices_len + residual_errors + len_outliers
-            print(f'model len: {model_len:.3f}\tindices len: {indices_len:.3f}\terror: {residual_errors:.3f}\toutliers: {len_outliers:.3f}\ttotal len: {total_description_len:.3f}')
+            print(f'{nc}\ttotal: {total_description_len:.2f}\tmodel: {model_len:.2f}\terror: {residual_errors:.2f}\tindices: {indices_len:.2f}\toutliers: {len_outliers:.2f}')
             if total_description_len < best_dl:
                 best_dl = total_description_len
                 best_nc = nc
@@ -80,7 +76,9 @@ def torch_min(t,val):
     return torch.minimum(t,val*torch.ones_like(t))
 
 def apply_random_conv_layer(x):
-    nin = x.shape[0]
+    if x.ndim == 3:
+        x = x.unsqueeze(0)
+    nin = x.shape[1]
     cnvl = nn.Conv2d(nin, 2*nin, 3, device=x.device)
     x = cnvl(x)
     x = F.max_pool2d(x,2)
@@ -92,6 +90,10 @@ dset = torchvision.datasets.CIFAR10(root='/home/louis/datasets',download=True,tr
 dloader = torch.utils.data.DataLoader(dset, batch_size=1,shuffle=True, num_workers=2)
 im = next(iter(dloader))[0][0]
 blobs = torch.tensor(blobs).transpose(0,1)
-#comp_meas = ComplexityMeasurer(im)
-comp_meas = ComplexityMeasurer(im)
-comp_meas.interpret()
+comp_meas = ComplexityMeasurer(im,ks=3)
+assembly_num = comp_meas.interpret()
+print(assembly_num)
+nonim = torch.rand_like(im)
+comp_meas = ComplexityMeasurer(nonim,ks=3)
+assembly_num = comp_meas.interpret()
+print(assembly_num)
