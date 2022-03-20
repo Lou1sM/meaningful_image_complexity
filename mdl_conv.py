@@ -53,7 +53,9 @@ class ComplexityMeasurer():
         return torch.tensor(probs)
 
     def mdl_cluster(self):
-        x = self.x.reshape(-1,self.x.shape[-1])
+        #x = self.x.reshape(-1,self.x.shape[-1])
+        patched = patch_averages(self.x)
+        x = patched.reshape(-1,patched.shape[-1])
         assert x.ndim == 2
         N,nz = x.shape
         len_of_each_cluster = nz + (nz*(nz+1)/2) * np.log2((x.max() - x.min())/self.prec)
@@ -78,6 +80,11 @@ class ComplexityMeasurer():
         if self.verbose:
             print(f'best dl is {best_dl:.3f} with {best_nc} clusters')
         return best_nc, best_dl
+
+def patch_averages(a):
+    padded = np.pad(a,1)
+    summed = padded[:-1,:-1] + padded[:-1,1:] + padded[1:,:-1] + padded[1:,1:]
+    return (summed/4)[1:-1,1:-1]
 
 def torch_min(t,val):
     return torch.minimum(t,val*torch.ones_like(t))
