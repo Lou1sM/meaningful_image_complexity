@@ -44,9 +44,11 @@ class ComplexityMeasurer():
     def log_model_prob(self,dpoint,cluster_label):
         pc = self.model.precisions_cholesky_[cluster_label]
         m = self.model.means_[cluster_label]
-        #mahalanobis_distance = sqeuclidean(np.matmul(np.transpose(pc),(dpoint-m)))
-        mahalanobis_distance = np.linalg.norm(np.matmul(np.transpose(pc),(dpoint-m)))**2
-        ml_in_nats = -0.5 * (3*np.log(2*np.pi) + mahalanobis_distance) + np.log(np.linalg.det(pc))
+        nz = dpoint.shape[0]
+        mahalanobis_distance = sqeuclidean(np.matmul(np.transpose(pc),(dpoint-m)))
+        mahalanobis_distance_ = np.linalg.norm(np.matmul(np.transpose(pc),(dpoint-m)))**2
+        assert np.allclose(mahalanobis_distance,mahalanobis_distance_)
+        ml_in_nats = -0.5 * (nz*np.log(2*np.pi) + mahalanobis_distance) + np.log(np.linalg.det(pc))
         return np.log2(np.e) * ml_in_nats
 
     def log_model_probs_for_dset(self,x):
@@ -55,7 +57,6 @@ class ComplexityMeasurer():
         return torch.tensor(probs)
 
     def mdl_cluster(self):
-        #x = self.x.reshape(-1,self.x.shape[-1])
         patched = patch_averages(self.x)
         x = patched.reshape(-1,patched.shape[-1])
         assert x.ndim == 2
@@ -70,8 +71,11 @@ class ComplexityMeasurer():
             model_len = nc*(len_of_each_cluster)
             indices_len = N * np.log2(nc)
             neg_log_probs = -self.log_model_probs_for_dset(x)
+            built_in_scores_ = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
+            built_in_scores = built_in_scores_ * np.log2(np.e)
+            if not np.allclose(neg_log_probs,built_in_scores):
+                breakpoint()
             outliers = neg_log_probs>len_of_outlier
-            print('my way', neg_log_probs.sum().item(),'score way', self.model.score(x)*N*np.log2(np.e))
             residual_errors = neg_log_probs[~outliers].sum()
             len_outliers = len_of_outlier * outliers.sum()
             total_description_len = model_len + indices_len + residual_errors + len_outliers
@@ -105,14 +109,13 @@ def apply_random_conv_layer(x):
 
 sqeuclidean = lambda x: np.inner(x,x)
 dset = torchvision.datasets.CIFAR10(root='/home/louis/datasets',download=True,train=True)
-#dset = torchvision.datasets.ImageNet(root='/home/louis/datasets',split='val',download=True)
 #dset=torchvision.datasets.MNIST(root='/home/louis/datasets',train=False,download=True)
 all_assembly_idxs = []
-for i in range(1):
+for i in range(10):
     #im = numpyify(dset.data[i].unsqueeze(2))/255
     #im = dset.data[i]/255
     im = np.array(dset.data[i])/255
-    #im = np.resize(im,(224,224))
+    im = np.resize(im,(96,96))
     #im, label = load_rand_imagenette_val(True)
     label = dset.targets[i]
     #plt.imshow(im);plt.show()
