@@ -24,7 +24,6 @@ def load_rand_imagenette_val(is_resize=False):
     fpath = join(class_dir_path,fname)
     im = Image.open(fpath)
     if is_resize:
-        breakpoint()
         h,w = im.size[:2]
         aspect_ratio = h/w
         new_h = (224*224*aspect_ratio)**0.5
@@ -32,6 +31,6 @@ def load_rand_imagenette_val(is_resize=False):
         new_h_int = round(new_h)
         new_w_int = round(new_w)
         assert (new_h_int*new_w_int - 224*224) < min(new_h,new_w)
-        im.resize((new_h_int,new_w_int))
+        im = im.resize((new_h_int,new_w_int))
     class_name = synset_dict[class_dir]
     return np.array(im), class_name

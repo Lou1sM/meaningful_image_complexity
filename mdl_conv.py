@@ -41,46 +41,30 @@ class ComplexityMeasurer():
         increments = [sx2-sx1 for sx1,sx2 in zip(sx[:-1],sx[1:])]
         self.prec = min([item for item in increments if item != 0])
 
-    def log_model_prob(self,dpoint,cluster_label):
-        pc = self.model.precisions_cholesky_[cluster_label]
-        m = self.model.means_[cluster_label]
-        nz = dpoint.shape[0]
-        mahalanobis_distance = sqeuclidean(np.matmul(np.transpose(pc),(dpoint-m)))
-        mahalanobis_distance_ = np.linalg.norm(np.matmul(np.transpose(pc),(dpoint-m)))**2
-        assert np.allclose(mahalanobis_distance,mahalanobis_distance_)
-        ml_in_nats = -0.5 * (nz*np.log(2*np.pi) + mahalanobis_distance) + np.log(np.linalg.det(pc))
-        return np.log2(np.e) * ml_in_nats
-
-    def log_model_probs_for_dset(self,x):
-        dpoints_and_labels = zip(x,self.cluster_labels)
-        probs = [self.log_model_prob(x_item,cl).item() for x_item,cl in dpoints_and_labels]
-        return torch.tensor(probs)
-
     def mdl_cluster(self):
         patched = patch_averages(self.x)
         x = patched.reshape(-1,patched.shape[-1])
         assert x.ndim == 2
         N,nz = x.shape
+        data_range = x.max() - x.min()
+        print(f'drange: {data_range:.3f} prec: {self.prec:.3f},nz:{nz}')
         len_of_each_cluster = nz + (nz*(nz+1)/2) * np.log2((x.max() - x.min())/self.prec)
         len_of_outlier = nz * np.log2(x.max() - x.min())
         best_dl = np.inf
         best_nc = -1
-        for nc in range(1,11):
+        for nc in range(1,21):
             self.model = GMM(nc)
             self.cluster_labels = self.model.fit_predict(x)
             model_len = nc*(len_of_each_cluster)
             indices_len = N * np.log2(nc)
-            neg_log_probs = -self.log_model_probs_for_dset(x)
-            built_in_scores_ = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
-            built_in_scores = built_in_scores_ * np.log2(np.e)
-            if not np.allclose(neg_log_probs,built_in_scores):
-                breakpoint()
+            built_in_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
+            neg_log_probs = built_in_scores * np.log2(np.e)
             outliers = neg_log_probs>len_of_outlier
             residual_errors = neg_log_probs[~outliers].sum()
             len_outliers = len_of_outlier * outliers.sum()
             total_description_len = model_len + indices_len + residual_errors + len_outliers
             if self.verbose:
-                print(f'{nc}\ttotal: {total_description_len:.2f}\tmodel: {model_len:.2f}\terror: {residual_errors:.2f}\tindices: {indices_len:.2f}\toutliers: {outliers.sum()} {len_outliers:.2f}')
+                print(f'{nc}: {total_description_len:.2f}\tmodel: {model_len:.2f}\terror: {residual_errors:.2f}\tidxs: {indices_len:.2f}\toutliers: {outliers.sum()} {len_outliers:.2f}')
             if total_description_len < best_dl:
                 best_dl = total_description_len
                 best_nc = nc
@@ -89,7 +73,7 @@ class ComplexityMeasurer():
         return best_nc, best_dl
 
 def patch_averages(a):
-    padded = np.pad(a,1)
+    padded = np.pad(a,1)[:,:,1:-1]
     summed = padded[:-1,:-1] + padded[:-1,1:] + padded[1:,:-1] + padded[1:,1:]
     return (summed/4)[1:-1,1:-1]
 
@@ -111,15 +95,15 @@ sqeuclidean = lambda x: np.inner(x,x)
 dset = torchvision.datasets.CIFAR10(root='/home/louis/datasets',download=True,train=True)
 #dset=torchvision.datasets.MNIST(root='/home/louis/datasets',train=False,download=True)
 all_assembly_idxs = []
-for i in range(10):
+for i in range(1,10):
     #im = numpyify(dset.data[i].unsqueeze(2))/255
     #im = dset.data[i]/255
-    im = np.array(dset.data[i])/255
-    im = np.resize(im,(96,96))
-    #im, label = load_rand_imagenette_val(True)
-    label = dset.targets[i]
+    #im = np.array(dset.data[i])/255
+    #im = np.resize(im,(224,224,3))
+    im, label = load_rand_imagenette_val(True)
+    #label = dset.targets[i]
     #plt.imshow(im);plt.show()
-    comp_meas = ComplexityMeasurer(im,ks=4,verbose=False)
+    comp_meas = ComplexityMeasurer(im,ks=4,verbose=True)
     assembly_idx = comp_meas.interpret()
     print(f'Class: {label}\tAssemby num: {assembly_idx}')
     all_assembly_idxs.append(assembly_idx)
