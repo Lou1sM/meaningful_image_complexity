@@ -1,4 +1,5 @@
 import torch
+import argparse
 from PIL import Image
 from dl_utils.tensor_funcs import numpyify
 import sklearn.datasets as data
@@ -13,28 +14,30 @@ from load_imagenette import load_rand_imagenette_val
 
 
 class ComplexityMeasurer():
-    def __init__(self,x,ks,verbose):
+    def __init__(self,x,ks,verbose,ncs_to_check):
         self.x = x
         self.ks = ks
         self.verbose = verbose
+        self.ncs_to_check = ncs_to_check
         self.get_smallest_increment(x)
         pass
 
     def interpret(self):
         total_num_clusters = 0
+        highest_meaningful_level = 0
         while True:
             num_clusters_at_this_level, dl = self.mdl_cluster()
             if self.verbose:
                 print('num clusters at this level is', num_clusters_at_this_level)
             if num_clusters_at_this_level == 1:
-                return total_num_clusters
+                return total_num_clusters, highest_meaningful_level
             total_num_clusters += num_clusters_at_this_level
             self.x = apply_random_conv_layer(self.x)
             if self.verbose:
                 print(f'applying cl to make im size {self.x.shape}')
-            if self.x.shape[0]*self.x.shape[1] < 20:
-                return total_num_clusters
-        return total_num_clusters
+            if (self.x.shape[0]-1)*(self.x.shape[1]-1) < 20:
+                return total_num_clusters, highest_meaningful_level
+            highest_meaningful_level += 1
 
     def get_smallest_increment(self,x):
         sx = sorted(x.flatten())
@@ -47,12 +50,13 @@ class ComplexityMeasurer():
         assert x.ndim == 2
         N,nz = x.shape
         data_range = x.max() - x.min()
-        print(f'drange: {data_range:.3f} prec: {self.prec:.3f},nz:{nz}')
+        if self.verbose:
+            print(f'drange: {data_range:.3f} prec: {self.prec:.3f},nz:{nz}')
         len_of_each_cluster = nz + (nz*(nz+1)/2) * np.log2((x.max() - x.min())/self.prec)
         len_of_outlier = nz * np.log2(x.max() - x.min())
         best_dl = np.inf
         best_nc = -1
-        for nc in range(1,21):
+        for nc in range(1,self.ncs_to_check):
             self.model = GMM(nc)
             self.cluster_labels = self.model.fit_predict(x)
             model_len = nc*(len_of_each_cluster)
@@ -91,25 +95,46 @@ def apply_random_conv_layer(x):
     torch_x = F.relu(torch_x)
     return numpyify(torch_x.squeeze(0).transpose(0,2))
 
-sqeuclidean = lambda x: np.inner(x,x)
-dset = torchvision.datasets.CIFAR10(root='/home/louis/datasets',download=True,train=True)
-#dset=torchvision.datasets.MNIST(root='/home/louis/datasets',train=False,download=True)
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--resize',action='store_true')
+parser.add_argument('--verbose',action='store_true')
+parser.add_argument('--display_images',action='store_true')
+parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand'],required=True)
+parser.add_argument('--num_ims',type=int,default=10)
+parser.add_argument('--ncs_to_check',type=int,default=10)
+ARGS = parser.parse_args()
+
+if ARGS.dset == 'cifar':
+    dset = torchvision.datasets.CIFAR10(root='/home/louis/datasets',download=True,train=True)
+elif ARGS.dset == 'mnist':
+    dset = torchvision.datasets.MNIST(root='/home/louis/datasets',train=False,download=True)
+elif ARGS.dset == 'rand':
+    dset = np.random.rand(ARGS.num_ims,224,224,3)
 all_assembly_idxs = []
-for i in range(1,10):
-    #im = numpyify(dset.data[i].unsqueeze(2))/255
-    #im = dset.data[i]/255
-    #im = np.array(dset.data[i])/255
-    #im = np.resize(im,(224,224,3))
-    im, label = load_rand_imagenette_val(True)
-    #label = dset.targets[i]
-    #plt.imshow(im);plt.show()
-    comp_meas = ComplexityMeasurer(im,ks=4,verbose=True)
-    assembly_idx = comp_meas.interpret()
-    print(f'Class: {label}\tAssemby num: {assembly_idx}')
+all_levels = []
+for i in range(ARGS.num_ims):
+    if ARGS.dset == 'im':
+        im, label = load_rand_imagenette_val(ARGS.resize)
+    elif ARGS.dset == 'rand':
+        im = dset[i]
+        label = 'none'
+    else:
+        if ARGS.dset == 'cifar':
+            im = dset.data[i]/255
+        elif ARGS.dset == 'mnist':
+            im = numpyify(dset.data[i].unsqueeze(2))/255
+        im = np.array(dset.data[i])/255
+        im = np.resize(im,(224,224,3))
+        label = dset.targets[i]
+    if ARGS.display_images:
+        plt.imshow(im);plt.show()
+    comp_meas = ComplexityMeasurer(im,ks=4,verbose=ARGS.verbose,ncs_to_check=ARGS.ncs_to_check)
+    assembly_idx,level = comp_meas.interpret()
+    print(f'Class: {label}\tAssemby num: {assembly_idx}\tLevel: {level}')
     all_assembly_idxs.append(assembly_idx)
+    all_levels.append(level)
 mean_assembly_idx = np.array(all_assembly_idxs).mean()
+mean_level = np.array(all_levels).mean()
 print(f'Mean assembly idx: {mean_assembly_idx}')
-nonim = np.random.rand(*im.shape)*im.max()
-comp_meas = ComplexityMeasurer(nonim,ks=4,verbose=False)
-assembly_num = comp_meas.interpret()
-print(assembly_num)
+print(f'Mean level idx: {mean_level}')
