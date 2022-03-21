@@ -10,32 +10,36 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 from torchvision.transforms import ToTensor
+from torchvision import models
 from load_imagenette import load_rand_imagenette_val
 
 
 class ComplexityMeasurer():
-    def __init__(self,x,ks,verbose,ncs_to_check):
-        self.x = x
-        self.ks = ks
+    def __init__(self,verbose,ncs_to_check,resnet):
         self.verbose = verbose
         self.ncs_to_check = ncs_to_check
-        self.get_smallest_increment(x)
-        pass
+        self.layer1 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu,resnet.maxpool)
+        self.layer2 = resnet.layer1
+        self.layer3 = resnet.layer2
+        self.layer4 = resnet.layer3
+        self.layer5 = resnet.layer4
+        self.layers = (self.layer1,self.layer2,self.layer3,self.layer4,self.layer5)
 
-    def interpret(self):
+    def interpret(self,x):
+        self.get_smallest_increment(x)
         total_num_clusters = 0
         highest_meaningful_level = 0
         while True:
-            num_clusters_at_this_level, dl = self.mdl_cluster()
+            x = self.apply_conv_layer(x,highest_meaningful_level)
             if self.verbose:
-                print('num clusters at this level is', num_clusters_at_this_level)
+                print(f'applying cl to make im size {x.shape}')
+            num_clusters_at_this_level, dl = self.mdl_cluster(x)
+            if self.verbose:
+                print(f'num clusters at level {highest_meaningful_level}: {num_clusters_at_this_level}')
             if num_clusters_at_this_level == 1:
                 return total_num_clusters, highest_meaningful_level
             total_num_clusters += num_clusters_at_this_level
-            self.x = apply_random_conv_layer(self.x)
-            if self.verbose:
-                print(f'applying cl to make im size {self.x.shape}')
-            if (self.x.shape[0]-1)*(self.x.shape[1]-1) < 20:
+            if (x.shape[0]-1)*(x.shape[1]-1) < 20:
                 return total_num_clusters, highest_meaningful_level
             highest_meaningful_level += 1
 
@@ -44,8 +48,8 @@ class ComplexityMeasurer():
         increments = [sx2-sx1 for sx1,sx2 in zip(sx[:-1],sx[1:])]
         self.prec = min([item for item in increments if item != 0])
 
-    def mdl_cluster(self):
-        patched = patch_averages(self.x)
+    def mdl_cluster(self,x):
+        patched = patch_averages(x)
         x = patched.reshape(-1,patched.shape[-1])
         assert x.ndim == 2
         N,nz = x.shape
@@ -57,7 +61,7 @@ class ComplexityMeasurer():
         best_dl = np.inf
         best_nc = -1
         for nc in range(1,self.ncs_to_check):
-            self.model = GMM(nc)
+            self.model = GMM(nc,n_init=5)
             self.cluster_labels = self.model.fit_predict(x)
             model_len = nc*(len_of_each_cluster)
             indices_len = N * np.log2(nc)
@@ -76,24 +80,29 @@ class ComplexityMeasurer():
             print(f'best dl is {best_dl:.3f} with {best_nc} clusters')
         return best_nc, best_dl
 
+    def apply_conv_layer(self,x,layer_num):
+        torch_x = torch.tensor(x).transpose(0,2).float()
+        if torch_x.ndim == 3:
+            torch_x = torch_x.unsqueeze(0)
+        layer_to_apply = self.layers[layer_num]
+        torch_x = layer_to_apply(torch_x)
+        #nin = torch_x.shape[1]
+        #cnvl = nn.Conv2d(nin, 2*nin, 3, device=torch_x.device)
+        #torch_x = cnvl(torch_x)
+        #torch_x = F.max_pool2d(torch_x,2)
+        #torch_x = F.relu(torch_x)
+        return numpyify(torch_x.squeeze(0).transpose(0,2))
+
 def patch_averages(a):
-    padded = np.pad(a,1)[:,:,1:-1]
+    try:
+        padded = np.pad(a,1)[:,:,1:-1]
+    except Exception as e:
+        breakpoint()
     summed = padded[:-1,:-1] + padded[:-1,1:] + padded[1:,:-1] + padded[1:,1:]
     return (summed/4)[1:-1,1:-1]
 
 def torch_min(t,val):
     return torch.minimum(t,val*torch.ones_like(t))
-
-def apply_random_conv_layer(x):
-    torch_x = torch.tensor(x).transpose(0,2).float()
-    if torch_x.ndim == 3:
-        torch_x = torch_x.unsqueeze(0)
-    nin = torch_x.shape[1]
-    cnvl = nn.Conv2d(nin, 2*nin, 3, device=torch_x.device)
-    torch_x = cnvl(torch_x)
-    torch_x = F.max_pool2d(torch_x,2)
-    torch_x = F.relu(torch_x)
-    return numpyify(torch_x.squeeze(0).transpose(0,2))
 
 
 parser = argparse.ArgumentParser()
@@ -113,6 +122,8 @@ elif ARGS.dset == 'rand':
     dset = np.random.rand(ARGS.num_ims,224,224,3)
 all_assembly_idxs = []
 all_levels = []
+net = models.resnet18(pretrained=True)
+comp_meas = ComplexityMeasurer(verbose=ARGS.verbose,ncs_to_check=ARGS.ncs_to_check,resnet=net)
 for i in range(ARGS.num_ims):
     if ARGS.dset == 'im':
         im, label = load_rand_imagenette_val(ARGS.resize)
@@ -129,8 +140,7 @@ for i in range(ARGS.num_ims):
         label = dset.targets[i]
     if ARGS.display_images:
         plt.imshow(im);plt.show()
-    comp_meas = ComplexityMeasurer(im,ks=4,verbose=ARGS.verbose,ncs_to_check=ARGS.ncs_to_check)
-    assembly_idx,level = comp_meas.interpret()
+    assembly_idx,level = comp_meas.interpret(im)
     print(f'Class: {label}\tAssemby num: {assembly_idx}\tLevel: {level}')
     all_assembly_idxs.append(assembly_idx)
     all_levels.append(level)
