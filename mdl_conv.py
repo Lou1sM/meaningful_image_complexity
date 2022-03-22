@@ -15,8 +15,9 @@ from load_imagenette import load_rand_imagenette_val
 
 
 class ComplexityMeasurer():
-    def __init__(self,verbose,ncs_to_check,resnet):
+    def __init__(self,verbose,ncs_to_check,resnet,n_cluster_inits):
         self.verbose = verbose
+        self.n_cluster_inits = n_cluster_inits
         self.ncs_to_check = ncs_to_check
         self.layer1 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu,resnet.maxpool)
         self.layer2 = resnet.layer1
@@ -61,7 +62,7 @@ class ComplexityMeasurer():
         best_dl = np.inf
         best_nc = -1
         for nc in range(1,self.ncs_to_check):
-            self.model = GMM(nc,n_init=5)
+            self.model = GMM(nc,n_init=self.n_cluster_inits)
             self.cluster_labels = self.model.fit_predict(x)
             model_len = nc*(len_of_each_cluster)
             indices_len = N * np.log2(nc)
@@ -106,12 +107,14 @@ def torch_min(t,val):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--resize',action='store_true')
+parser.add_argument('--no_resize',action='store_true')
 parser.add_argument('--verbose',action='store_true')
 parser.add_argument('--display_images',action='store_true')
+parser.add_argument('--conv_abl',action='store_true')
 parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand'],required=True)
 parser.add_argument('--num_ims',type=int,default=10)
 parser.add_argument('--ncs_to_check',type=int,default=10)
+parser.add_argument('--n_cluster_inits',type=int,default=1)
 ARGS = parser.parse_args()
 
 if ARGS.dset == 'cifar':
@@ -123,10 +126,10 @@ elif ARGS.dset == 'rand':
 all_assembly_idxs = []
 all_levels = []
 net = models.resnet18(pretrained=True)
-comp_meas = ComplexityMeasurer(verbose=ARGS.verbose,ncs_to_check=ARGS.ncs_to_check,resnet=net)
+comp_meas = ComplexityMeasurer(verbose=ARGS.verbose,ncs_to_check=ARGS.ncs_to_check,resnet=net,n_cluster_inits=ARGS.n_cluster_inits)
 for i in range(ARGS.num_ims):
     if ARGS.dset == 'im':
-        im, label = load_rand_imagenette_val(ARGS.resize)
+        im, label = load_rand_imagenette_val(~ARGS.no_resize)
     elif ARGS.dset == 'rand':
         im = dset[i]
         label = 'none'
@@ -140,10 +143,16 @@ for i in range(ARGS.num_ims):
         label = dset.targets[i]
     if ARGS.display_images:
         plt.imshow(im);plt.show()
-    assembly_idx,level = comp_meas.interpret(im)
-    print(f'Class: {label}\tAssemby num: {assembly_idx}\tLevel: {level}')
-    all_assembly_idxs.append(assembly_idx)
-    all_levels.append(level)
+    if ARGS.conv_abl:
+        comp_meas.get_smallest_increment(im)
+        nc_in_image_itself,_ = comp_meas.mdl_cluster(im)
+        print(f'Class: {label}\tNC in image itself: {nc_in_image_itself}')
+        all_assembly_idxs.append(nc_in_image_itself)
+    else:
+        assembly_idx,level = comp_meas.interpret(im)
+        print(f'Class: {label}\tAssemby num: {assembly_idx}\tLevel: {level}')
+        all_assembly_idxs.append(assembly_idx)
+        all_levels.append(level)
 mean_assembly_idx = np.array(all_assembly_idxs).mean()
 mean_level = np.array(all_levels).mean()
 print(f'Mean assembly idx: {mean_assembly_idx}')
