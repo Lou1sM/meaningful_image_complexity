@@ -4,7 +4,7 @@ from os import listdir
 from os.path import join
 
 
-synset_dict = {
+imagenette_synset_dict = {
     'n01440764': 'tench',
     'n02102040': 'spaniel',
     'n02979186': 'cassette player',
@@ -17,9 +17,10 @@ synset_dict = {
     'n03888257': 'parachute'
     }
 
-def load_rand_imagenette_val(is_resize=False):
-    class_dir = np.random.choice(listdir('imagenette2/val'))
-    class_dir_path = join('imagenette2/val',class_dir)
+def load_rand(dset,is_resize=False):
+    dset_dir = 'imagenette2/val' if dset=='imagenette' else 'dtd/images'
+    class_dir = np.random.choice(listdir(dset_dir))
+    class_dir_path = join(dset_dir,class_dir)
     fname = np.random.choice(listdir(class_dir_path))
     fpath = join(class_dir_path,fname)
     im = Image.open(fpath)
@@ -30,7 +31,8 @@ def load_rand_imagenette_val(is_resize=False):
         new_w = 224*224/new_h
         new_h_int = round(new_h)
         new_w_int = round(new_w)
-        assert (new_h_int*new_w_int - 224*224) < min(new_h,new_w)
+        if not (new_h_int*new_w_int - 224*224) < min(new_h,new_w):
+            breakpoint()
         im = im.resize((new_h_int,new_w_int))
-    class_name = synset_dict[class_dir]
+    class_name = imagenette_synset_dict[class_dir] if dset=='imagenette' else class_dir
     return np.array(im), class_name

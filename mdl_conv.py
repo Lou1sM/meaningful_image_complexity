@@ -1,22 +1,27 @@
-import torch
-import argparse
 from PIL import Image
+from matplotlib.colors import BASE_COLORS
 from dl_utils.tensor_funcs import numpyify
-import sklearn.datasets as data
-import matplotlib.pyplot as plt
+from load_non_torch_dsets import load_rand
+from make_simple_imgs import get_simple_img
+from sklearn.manifold import TSNE
 from sklearn.mixture import GaussianMixture as GMM
+from torchvision import models
+from torchvision.transforms import ToTensor
+import argparse
+import matplotlib.pyplot as plt
 import numpy as np
+import sklearn.datasets as data
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
-from torchvision.transforms import ToTensor
-from torchvision import models
-from load_imagenette import load_rand_imagenette_val
 
 
+PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
-    def __init__(self,verbose,ncs_to_check,resnet,n_cluster_inits):
+    def __init__(self,verbose,ncs_to_check,resnet,n_cluster_inits,display_cluster_imgs):
         self.verbose = verbose
+        self.display_cluster_imgs = display_cluster_imgs
         self.n_cluster_inits = n_cluster_inits
         self.ncs_to_check = ncs_to_check
         self.layer1 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu,resnet.maxpool)
@@ -25,12 +30,15 @@ class ComplexityMeasurer():
         self.layer4 = resnet.layer3
         self.layer5 = resnet.layer4
         self.layers = (self.layer1,self.layer2,self.layer3,self.layer4,self.layer5)
+        for layer in self.layers:
+            for m in layer.modules():
+                if hasattr(m,'padding_mode'):
+                    m.padding_mode = 'replicate'
 
     def interpret(self,x):
         self.get_smallest_increment(x)
         total_num_clusters = 0
-        highest_meaningful_level = 0
-        while True:
+        for highest_meaningful_level in range(5):
             x = self.apply_conv_layer(x,highest_meaningful_level)
             if self.verbose:
                 print(f'applying cl to make im size {x.shape}')
@@ -38,11 +46,11 @@ class ComplexityMeasurer():
             if self.verbose:
                 print(f'num clusters at level {highest_meaningful_level}: {num_clusters_at_this_level}')
             if num_clusters_at_this_level == 1:
-                return total_num_clusters, highest_meaningful_level
+                break
             total_num_clusters += num_clusters_at_this_level
             if (x.shape[0]-1)*(x.shape[1]-1) < 20:
-                return total_num_clusters, highest_meaningful_level
-            highest_meaningful_level += 1
+                break
+        return total_num_clusters, highest_meaningful_level
 
     def get_smallest_increment(self,x):
         sx = sorted(x.flatten())
@@ -64,6 +72,8 @@ class ComplexityMeasurer():
         for nc in range(1,self.ncs_to_check):
             self.model = GMM(nc,n_init=self.n_cluster_inits)
             self.cluster_labels = self.model.fit_predict(x)
+            if nc > 1 and self.display_cluster_imgs:
+                self.viz_cluster_labels(patched.shape[:2])
             model_len = nc*(len_of_each_cluster)
             indices_len = N * np.log2(nc)
             built_in_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
@@ -81,18 +91,32 @@ class ComplexityMeasurer():
             print(f'best dl is {best_dl:.3f} with {best_nc} clusters')
         return best_nc, best_dl
 
+    def viz_cluster_labels(self,size):
+        nc = len(np.unique(self.cluster_labels))
+        pallete = PALETTE[:nc]
+        coloured_clabs = np.array(pallete)[self.cluster_labels]
+        coloured_clabs = np.resize(coloured_clabs,(*size,3))
+        plt.imshow(coloured_clabs); plt.show()
+
     def apply_conv_layer(self,x,layer_num):
-        torch_x = torch.tensor(x).transpose(0,2).float()
-        if torch_x.ndim == 3:
-            torch_x = torch_x.unsqueeze(0)
-        layer_to_apply = self.layers[layer_num]
-        torch_x = layer_to_apply(torch_x)
-        #nin = torch_x.shape[1]
-        #cnvl = nn.Conv2d(nin, 2*nin, 3, device=torch_x.device)
-        #torch_x = cnvl(torch_x)
-        #torch_x = F.max_pool2d(torch_x,2)
-        #torch_x = F.relu(torch_x)
-        return numpyify(torch_x.squeeze(0).transpose(0,2))
+        try:
+            torch_x = torch.tensor(x).transpose(0,2).float()
+            if torch_x.ndim == 3:
+                torch_x = torch_x.unsqueeze(0)
+            layer_to_apply = self.layers[layer_num]
+            torch_x = layer_to_apply(torch_x)
+            #nin = torch_x.shape[1]
+            #cnvl = nn.Conv2d(nin, 2*nin, 3, device=torch_x.device)
+            #torch_x = cnvl(torch_x)
+            #torch_x = F.max_pool2d(torch_x,2)
+            #torch_x = F.relu(torch_x)
+            return numpyify(torch_x.squeeze(0).transpose(0,2))
+        except Exception as e:
+            print(e)
+            breakpoint()
+
+def viz_proc_im(x):
+    plt.imshow(x.sum(axis=2)); plt.show()
 
 def patch_averages(a):
     try:
@@ -108,10 +132,12 @@ def torch_min(t,val):
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--no_resize',action='store_true')
+parser.add_argument('--display_cluster_imgs',action='store_true')
+parser.add_argument('--no_pretrained',action='store_true')
 parser.add_argument('--verbose',action='store_true')
 parser.add_argument('--display_images',action='store_true')
 parser.add_argument('--conv_abl',action='store_true')
-parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand'],required=True)
+parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand','dtd','simp'],required=True)
 parser.add_argument('--num_ims',type=int,default=10)
 parser.add_argument('--ncs_to_check',type=int,default=10)
 parser.add_argument('--n_cluster_inits',type=int,default=1)
@@ -125,24 +151,37 @@ elif ARGS.dset == 'rand':
     dset = np.random.rand(ARGS.num_ims,224,224,3)
 all_assembly_idxs = []
 all_levels = []
-net = models.resnet18(pretrained=True)
-comp_meas = ComplexityMeasurer(verbose=ARGS.verbose,ncs_to_check=ARGS.ncs_to_check,resnet=net,n_cluster_inits=ARGS.n_cluster_inits)
+net = models.resnet18(pretrained=~ARGS.no_pretrained)
+comp_meas = ComplexityMeasurer(verbose=ARGS.verbose,ncs_to_check=ARGS.ncs_to_check,resnet=net,n_cluster_inits=ARGS.n_cluster_inits,display_cluster_imgs=ARGS.display_cluster_imgs)
+mean=[0.485, 0.456, 0.406]
+std=[0.229, 0.224, 0.225]
 for i in range(ARGS.num_ims):
     if ARGS.dset == 'im':
-        im, label = load_rand_imagenette_val(~ARGS.no_resize)
+        im, label = load_rand('imagenette',~ARGS.no_resize)
+        if im.ndim == 2:
+            im = np.resize(im,*(im.shape),1)
+    elif ARGS.dset == 'dtd':
+        im, label = load_rand('dtd',~ARGS.no_resize)
+    elif ARGS.dset == 'simp':
+        #label = np.random.choice(('stripes','halves'))
+        label = 'halves'
+        slope = np.random.rand()+.5
+        im = get_simple_img(label,slope,line_thickness=5)
     elif ARGS.dset == 'rand':
         im = dset[i]
         label = 'none'
     else:
         if ARGS.dset == 'cifar':
-            im = dset.data[i]/255
+            im = dset.data[i]
         elif ARGS.dset == 'mnist':
-            im = numpyify(dset.data[i].unsqueeze(2))/255
-        im = np.array(dset.data[i])/255
+            im = numpyify(dset.data[i].unsqueeze(2))
+        im = np.array(dset.data[i])
         im = np.resize(im,(224,224,3))
         label = dset.targets[i]
     if ARGS.display_images:
         plt.imshow(im);plt.show()
+    im = im/255
+    im = (im-mean)/std
     if ARGS.conv_abl:
         comp_meas.get_smallest_increment(im)
         nc_in_image_itself,_ = comp_meas.mdl_cluster(im)
