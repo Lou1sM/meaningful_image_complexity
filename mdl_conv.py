@@ -36,10 +36,9 @@ class ComplexityMeasurer():
                     m.padding_mode = 'replicate'
 
     def interpret(self,x):
-        self.get_smallest_increment(x)
         total_num_clusters = 0
-        for highest_meaningful_level in range(5):
-            x = self.apply_conv_layer(x,highest_meaningful_level)
+        for highest_meaningful_level in range(6):
+            self.get_smallest_increment(x)
             if self.verbose:
                 print(f'applying cl to make im size {x.shape}')
             num_clusters_at_this_level, dl = self.mdl_cluster(x)
@@ -50,6 +49,7 @@ class ComplexityMeasurer():
             total_num_clusters += num_clusters_at_this_level
             if (x.shape[0]-1)*(x.shape[1]-1) < 20:
                 break
+            x = self.apply_conv_layer(x,highest_meaningful_level)
         return total_num_clusters, highest_meaningful_level
 
     def get_smallest_increment(self,x):
@@ -57,9 +57,9 @@ class ComplexityMeasurer():
         increments = [sx2-sx1 for sx1,sx2 in zip(sx[:-1],sx[1:])]
         self.prec = min([item for item in increments if item != 0])
 
-    def mdl_cluster(self,x):
-        patched = patch_averages(x)
-        x = patched.reshape(-1,patched.shape[-1])
+    def mdl_cluster(self,x_as_img):
+        x = patch_averages(x_as_img) if ARGS.patch else x_as_img
+        x = x.reshape(-1,x.shape[-1])
         assert x.ndim == 2
         N,nz = x.shape
         data_range = x.max() - x.min()
@@ -72,8 +72,11 @@ class ComplexityMeasurer():
         for nc in range(1,self.ncs_to_check):
             self.model = GMM(nc,n_init=self.n_cluster_inits)
             self.cluster_labels = self.model.fit_predict(x)
+            if len(np.unique(self.cluster_labels)) == nc-1:
+                print(f"only found {nc-1} clusters when looking for {nc}, terminating here")
+                return nc-1, best_dl
             if nc > 1 and self.display_cluster_imgs:
-                self.viz_cluster_labels(patched.shape[:2])
+                self.viz_cluster_labels(x_as_img.shape[:2])
             model_len = nc*(len_of_each_cluster)
             indices_len = N * np.log2(nc)
             built_in_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
@@ -133,6 +136,7 @@ def torch_min(t,val):
 parser = argparse.ArgumentParser()
 parser.add_argument('--no_resize',action='store_true')
 parser.add_argument('--display_cluster_imgs',action='store_true')
+parser.add_argument('--patch',action='store_true')
 parser.add_argument('--no_pretrained',action='store_true')
 parser.add_argument('--verbose',action='store_true')
 parser.add_argument('--display_images',action='store_true')
@@ -176,9 +180,9 @@ for i in range(ARGS.num_ims):
         elif ARGS.dset == 'mnist':
             im = numpyify(dset.data[i].unsqueeze(2))
         im = np.array(dset.data[i])
-        im = np.resize(im,(224,224,3))
+        im = np.array(Image.fromarray(im).resize((224,224)))
         label = dset.targets[i]
-    if ARGS.display_images:
+    if ARGS.display_cluster_imgs:
         plt.imshow(im);plt.show()
     im = im/255
     im = (im-mean)/std
