@@ -31,7 +31,8 @@ def load_rand(dset,is_resize=False):
         new_w = 224*224/new_h
         new_h_int = round(new_h)
         new_w_int = round(new_w)
-        if not (new_h_int*new_w_int - 224*224) < min(new_h,new_w):
+        max_possible_error = (new_h_int + new_w_int) / 2
+        if not (new_h_int*new_w_int - 224*224) < max_possible_error:
             breakpoint()
         im = im.resize((new_h_int,new_w_int))
     class_name = imagenette_synset_dict[class_dir] if dset=='imagenette' else class_dir
