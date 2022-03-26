@@ -34,28 +34,41 @@ class ComplexityMeasurer():
             for m in layer.modules():
                 if hasattr(m,'padding_mode'):
                     m.padding_mode = 'replicate'
+        self.dummy_initial_layer = nn.Sequential(make_dummy_layer(7,2,3),nn.MaxPool2d(3,2,1,dilation=1,ceil_mode=False))
+        self.dummy_downsample_rlayer = make_dummy_layer(3,2,1)
 
     def interpret(self,x):
         total_num_clusters = 0
-        for highest_meaningful_level in range(6):
+        for layer_being_processed in range(6):
+            self.layer_being_processed = layer_being_processed
             self.get_smallest_increment(x)
             if self.verbose:
                 print(f'applying cl to make im size {x.shape}')
             num_clusters_at_this_level, dl = self.mdl_cluster(x)
             if self.verbose:
-                print(f'num clusters at level {highest_meaningful_level}: {num_clusters_at_this_level}')
+                print(f'num clusters at level {layer_being_processed}: {num_clusters_at_this_level}')
             if num_clusters_at_this_level == 1:
                 break
             total_num_clusters += num_clusters_at_this_level
             if (x.shape[0]-1)*(x.shape[1]-1) < 20:
                 break
-            x = self.apply_conv_layer(x,highest_meaningful_level)
-        return total_num_clusters, highest_meaningful_level
+            x = self.apply_conv_layer(x,layer_being_processed)
+        return total_num_clusters, layer_being_processed
 
     def get_smallest_increment(self,x):
         sx = sorted(x.flatten())
         increments = [sx2-sx1 for sx1,sx2 in zip(sx[:-1],sx[1:])]
         self.prec = min([item for item in increments if item != 0])
+
+    def project_clusters(self):
+        prev_clabs_as_img = np.expand_dims(self.best_cluster_labels,2)
+        if self.layer_being_processed==2:
+            proj_clusters_as_img = prev_clabs_as_img
+        elif self.layer_being_processed==1:
+            proj_clusters_as_img = self.apply_conv_layer(prev_clabs_as_img,custom_cnvl=self.dummy_initial_layer)
+        else:
+            proj_clusters_as_img = self.apply_conv_layer(prev_clabs_as_img,custom_cnvl=self.dummy_downsample_rlayer)
+        return proj_clusters_as_img.flatten().round().astype(int)
 
     def mdl_cluster(self,x_as_img):
         x = patch_averages(x_as_img) if ARGS.patch else x_as_img
@@ -65,10 +78,24 @@ class ComplexityMeasurer():
         data_range = x.max() - x.min()
         if self.verbose:
             print(f'drange: {data_range:.3f} prec: {self.prec:.3f},nz:{nz}')
-        len_of_each_cluster = nz + (nz*(nz+1)/2) * np.log2((x.max() - x.min())/self.prec)
-        len_of_outlier = nz * np.log2(x.max() - x.min())
+        len_of_each_cluster = nz + (nz*(nz+1)/2) * (np.log2(x.max() - x.min()) + 32) # Float precision
+        len_of_outlier = nz * np.log2(x.max() - x.min()) # Omit the 32 here because implicitly omitted in the model log_prob computation
         best_dl = np.inf
         best_nc = -1
+        if self.layer_being_processed == 0:
+            hangover_neg_log_probs = np.inf*np.ones(len(x))
+        else:
+            hangover_cluster_labels = self.project_clusters()
+            means = np.stack([x[hangover_cluster_labels==i].mean(axis=0) for i in np.unique(hangover_cluster_labels)])
+            covars = np.stack([np.cov(x[hangover_cluster_labels==i].transpose(1,0)) for i in np.unique(hangover_cluster_labels)])
+            self.hangover_GMM = GMM(len(np.unique(hangover_cluster_labels)))
+            self.hangover_GMM.fit(np.random.rand(10,x.shape[1]))
+            self.hangover_GMM.means_ = means
+            self.hangover_GMM.covariance_ = covars
+            self.hangover_GMM.precisions_ = np.linalg.inv(covars+np.identity(covars.shape[1])*1e-8)
+            self.hangover_GMM.precisions_cholesky_ = np.linalg.cholesky(self.hangover_GMM.precisions_)
+            hangover_model_scores = -self.hangover_GMM._estimate_log_prob(x)[np.arange(len(x)),hangover_cluster_labels]
+            hangover_neg_log_probs = hangover_model_scores * np.log2(np.e)
         for nc in range(1,self.ncs_to_check):
             self.model = GMM(nc,n_init=self.n_cluster_inits)
             self.cluster_labels = self.model.fit_predict(x)
@@ -79,17 +106,23 @@ class ComplexityMeasurer():
                 self.viz_cluster_labels(x_as_img.shape[:2])
             model_len = nc*(len_of_each_cluster)
             indices_len = N * np.log2(nc)
-            built_in_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
-            neg_log_probs = built_in_scores * np.log2(np.e)
-            outliers = neg_log_probs>len_of_outlier
-            residual_errors = neg_log_probs[~outliers].sum()
+            new_model_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
+            neg_log_probs = new_model_scores * np.log2(np.e)
+            inliers = neg_log_probs<np.minimum(hangover_neg_log_probs,len_of_outlier)
+            residual_errors = neg_log_probs[inliers].sum()
+            accounted_for_by_hangover_GMM = np.logical_and((hangover_neg_log_probs<len_of_outlier), ~inliers)
+            len_hangovers = hangover_neg_log_probs[accounted_for_by_hangover_GMM].sum()
+            outliers = ~np.logical_or(inliers,accounted_for_by_hangover_GMM)
             len_outliers = len_of_outlier * outliers.sum()
-            total_description_len = model_len + indices_len + residual_errors + len_outliers
+            total_description_len = model_len + indices_len + residual_errors + len_hangovers + len_outliers
             if self.verbose:
-                print(f'{nc}: {total_description_len:.2f}\tmodel: {model_len:.2f}\terror: {residual_errors:.2f}\tidxs: {indices_len:.2f}\toutliers: {outliers.sum()} {len_outliers:.2f}')
+                print(f'{nc}: {total_description_len:.2f}\tmodel: {model_len:.2f}\terror: {residual_errors:.2f}\thangover_errors: {accounted_for_by_hangover_GMM.sum()} {len_hangovers:.2f}\toutliers: {outliers.sum()} {len_outliers:.2f}\tidxs: {indices_len:.2f}')
             if total_description_len < best_dl:
                 best_dl = total_description_len
                 best_nc = nc
+                self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:2])
+            #if nc > 1:
+                #breakpoint()
         if self.verbose:
             print(f'best dl is {best_dl:.3f} with {best_nc} clusters')
         return best_nc, best_dl
@@ -101,12 +134,13 @@ class ComplexityMeasurer():
         coloured_clabs = np.resize(coloured_clabs,(*size,3))
         plt.imshow(coloured_clabs); plt.show()
 
-    def apply_conv_layer(self,x,layer_num):
+    def apply_conv_layer(self,x,layer_num='none',custom_cnvl='none'):
+        assert (layer_num == 'none') ^ (custom_cnvl == 'none')
         try:
             torch_x = torch.tensor(x).transpose(0,2).float()
             if torch_x.ndim == 3:
                 torch_x = torch_x.unsqueeze(0)
-            layer_to_apply = self.layers[layer_num]
+            layer_to_apply = self.layers[layer_num] if custom_cnvl == 'none' else custom_cnvl
             torch_x = layer_to_apply(torch_x)
             #nin = torch_x.shape[1]
             #cnvl = nn.Conv2d(nin, 2*nin, 3, device=torch_x.device)
@@ -117,6 +151,11 @@ class ComplexityMeasurer():
         except Exception as e:
             print(e)
             breakpoint()
+
+def make_dummy_layer(ks,stride,padding):
+    cnvl = nn.Conv2d(1,1,ks,stride,padding=padding,padding_mode='replicate')
+    cnvl.weight.data=torch.ones_like(cnvl.weight).requires_grad_(False)/(ks**2)
+    return cnvl
 
 def viz_proc_im(x):
     plt.imshow(x.sum(axis=2)); plt.show()
@@ -141,8 +180,8 @@ parser.add_argument('--no_pretrained',action='store_true')
 parser.add_argument('--verbose',action='store_true')
 parser.add_argument('--display_images',action='store_true')
 parser.add_argument('--conv_abl',action='store_true')
-parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand','dtd','simp'],required=True)
-parser.add_argument('--num_ims',type=int,default=10)
+parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand','dtd','simp'],default='simp')
+parser.add_argument('--num_ims',type=int,default=1)
 parser.add_argument('--ncs_to_check',type=int,default=10)
 parser.add_argument('--n_cluster_inits',type=int,default=1)
 ARGS = parser.parse_args()
