@@ -1,9 +1,11 @@
 from PIL import Image
 from matplotlib.colors import BASE_COLORS
+from dl_utils.misc import scatter_clusters
 from dl_utils.tensor_funcs import numpyify
 from load_non_torch_dsets import load_rand
 from make_simple_imgs import get_simple_img
 from sklearn.manifold import TSNE
+from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture as GMM
 from torchvision import models
 from torchvision.transforms import ToTensor
@@ -15,6 +17,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+from umap import UMAP
 
 
 PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
@@ -37,11 +40,12 @@ class ComplexityMeasurer():
         self.dummy_initial_layer = nn.Sequential(make_dummy_layer(7,2,3),nn.MaxPool2d(3,2,1,dilation=1,ceil_mode=False))
         self.dummy_downsample_rlayer = make_dummy_layer(3,2,1)
 
-    def interpret(self,x):
+    def interpret(self,given_x):
+        x = np.copy(given_x)
         total_num_clusters = 0
+        self.get_smallest_increment(x)
         for layer_being_processed in range(6):
             self.layer_being_processed = layer_being_processed
-            self.get_smallest_increment(x)
             if self.verbose:
                 print(f'applying cl to make im size {x.shape}')
             num_clusters_at_this_level, dl = self.mdl_cluster(x)
@@ -52,6 +56,11 @@ class ComplexityMeasurer():
             total_num_clusters += num_clusters_at_this_level
             if (x.shape[0]-1)*(x.shape[1]-1) < 20:
                 break
+            if ARGS.centroidify:
+                full_im_size_means = [x[self.best_cluster_labels==c].mean(axis=0)
+                    for c in np.unique(self.best_cluster_labels)]
+                breakpoint()
+                x = np.array(full_im_size_means)[self.best_cluster_labels]
             x = self.apply_conv_layer(x,layer_being_processed)
         return total_num_clusters, layer_being_processed
 
@@ -75,11 +84,19 @@ class ComplexityMeasurer():
         x = x.reshape(-1,x.shape[-1])
         assert x.ndim == 2
         N,nz = x.shape
+        if nz > 50:
+            x = PCA(50).fit_transform(x)
+        if nz > 3:
+            #umap_neighbours = (30*len(x))//70000
+            #x = TSNE(2,init='pca',learning_rate='auto').fit_transform(x)
+            x = UMAP(min_dist=0,n_neighbors=50).fit_transform(x).squeeze()
+            scatter_clusters(x,labels=None,show=True)
+        N,nz = x.shape
         data_range = x.max() - x.min()
         if self.verbose:
             print(f'drange: {data_range:.3f} prec: {self.prec:.3f},nz:{nz}')
-        len_of_each_cluster = nz + (nz*(nz+1)/2) * (np.log2(x.max() - x.min()) + 32) # Float precision
-        len_of_outlier = nz * np.log2(x.max() - x.min()) # Omit the 32 here because implicitly omitted in the model log_prob computation
+        len_of_each_cluster = nz + (nz*(nz+1)/2) * (np.log2(data_range) + 32) # Float precision
+        len_of_outlier = nz * np.log2(data_range) # Omit the 32 here because implicitly omitted in the model log_prob computation
         best_dl = np.inf
         best_nc = -1
         if self.layer_being_processed == 0:
@@ -89,7 +106,7 @@ class ComplexityMeasurer():
             means = np.stack([x[hangover_cluster_labels==i].mean(axis=0) for i in np.unique(hangover_cluster_labels)])
             covars = np.stack([np.cov(x[hangover_cluster_labels==i].transpose(1,0)) for i in np.unique(hangover_cluster_labels)])
             self.hangover_GMM = GMM(len(np.unique(hangover_cluster_labels)))
-            self.hangover_GMM.fit(np.random.rand(10,x.shape[1]))
+            self.hangover_GMM.fit(np.random.rand(len(np.unique(self.best_cluster_labels)),x.shape[1]))
             self.hangover_GMM.means_ = means
             self.hangover_GMM.covariance_ = covars
             self.hangover_GMM.precisions_ = np.linalg.inv(covars+np.identity(covars.shape[1])*1e-8)
@@ -105,7 +122,10 @@ class ComplexityMeasurer():
             if nc > 1 and self.display_cluster_imgs:
                 self.viz_cluster_labels(x_as_img.shape[:2])
             model_len = nc*(len_of_each_cluster)
-            indices_len = N * np.log2(nc)
+            #indices_len = N * np.log2(nc)
+            indices_len = info_in_label_counts(self.cluster_labels)
+            #if nc > 1 and self.layer_being_processed > 0:
+                #breakpoint()
             new_model_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
             neg_log_probs = new_model_scores * np.log2(np.e)
             inliers = neg_log_probs<np.minimum(hangover_neg_log_probs,len_of_outlier)
@@ -116,15 +136,19 @@ class ComplexityMeasurer():
             len_outliers = len_of_outlier * outliers.sum()
             total_description_len = model_len + indices_len + residual_errors + len_hangovers + len_outliers
             if self.verbose:
-                print(f'{nc}: {total_description_len:.2f}\tmodel: {model_len:.2f}\terror: {residual_errors:.2f}\thangover_errors: {accounted_for_by_hangover_GMM.sum()} {len_hangovers:.2f}\toutliers: {outliers.sum()} {len_outliers:.2f}\tidxs: {indices_len:.2f}')
+                print(f'{nc}: {total_description_len:.1f}\tmodel: {model_len:.1f}\terror: {residual_errors:.1f}\thangover_errors: {accounted_for_by_hangover_GMM.sum()} {len_hangovers:.1f}\toutliers: {outliers.sum()} {len_outliers:.1f}\tidxs: {indices_len:.1f}')
             if total_description_len < best_dl:
                 best_dl = total_description_len
                 best_nc = nc
                 self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:2])
-            #if nc > 1:
-                #breakpoint()
+                self.best_model = self.model
         if self.verbose:
-            print(f'best dl is {best_dl:.3f} with {best_nc} clusters')
+            print(f'best dl is {best_dl:.2f} with {best_nc} clusters')
+            breakpoint()
+            #from hdbcan import HDBSCAN
+            #clusterer = HDBSCAN()
+            #clusterer.fit(x)
+            scatter_clusters(x,self.best_cluster_labels.flatten(),show=True)
         return best_nc, best_dl
 
     def viz_cluster_labels(self,size):
@@ -152,6 +176,13 @@ class ComplexityMeasurer():
             print(e)
             breakpoint()
 
+def info_in_label_counts(labels):
+    assert labels.ndim == 1
+    N = len(labels)
+    counts = np.bincount(labels)
+    log_counts = np.log2(counts)
+    return N*np.log2(N) - np.dot(counts,log_counts)
+
 def make_dummy_layer(ks,stride,padding):
     cnvl = nn.Conv2d(1,1,ks,stride,padding=padding,padding_mode='replicate')
     cnvl.weight.data=torch.ones_like(cnvl.weight).requires_grad_(False)/(ks**2)
@@ -177,8 +208,9 @@ parser.add_argument('--no_resize',action='store_true')
 parser.add_argument('--display_cluster_imgs',action='store_true')
 parser.add_argument('--patch',action='store_true')
 parser.add_argument('--no_pretrained',action='store_true')
-parser.add_argument('--verbose',action='store_true')
+parser.add_argument('--verbose','-v',action='store_true')
 parser.add_argument('--display_images',action='store_true')
+parser.add_argument('--centroidify',action='store_true')
 parser.add_argument('--conv_abl',action='store_true')
 parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand','dtd','simp'],default='simp')
 parser.add_argument('--num_ims',type=int,default=1)
@@ -200,11 +232,11 @@ mean=[0.485, 0.456, 0.406]
 std=[0.229, 0.224, 0.225]
 for i in range(ARGS.num_ims):
     if ARGS.dset == 'im':
-        im, label = load_rand('imagenette',~ARGS.no_resize)
+        im, label = load_rand('imagenette',~ARGS.no_resize)/255
         if im.ndim == 2:
-            im = np.resize(im,*(im.shape),1)
+            im = np.resize(im,(*(im.shape),1))
     elif ARGS.dset == 'dtd':
-        im, label = load_rand('dtd',~ARGS.no_resize)
+        im, label = load_rand('dtd',~ARGS.no_resize)/255
     elif ARGS.dset == 'simp':
         #label = np.random.choice(('stripes','halves'))
         label = 'halves'
@@ -215,7 +247,7 @@ for i in range(ARGS.num_ims):
         label = 'none'
     else:
         if ARGS.dset == 'cifar':
-            im = dset.data[i]
+            im = dset.data[i]/255
         elif ARGS.dset == 'mnist':
             im = numpyify(dset.data[i].unsqueeze(2))
         im = np.array(dset.data[i])
@@ -223,7 +255,7 @@ for i in range(ARGS.num_ims):
         label = dset.targets[i]
     if ARGS.display_cluster_imgs:
         plt.imshow(im);plt.show()
-    im = im/255
+    #im = im/255
     im = (im-mean)/std
     if ARGS.conv_abl:
         comp_meas.get_smallest_increment(im)
