@@ -61,7 +61,6 @@ class ComplexityMeasurer():
             if ARGS.centroidify:
                 full_im_size_means = [x[self.best_cluster_labels==c].mean(axis=0)
                     for c in np.unique(self.best_cluster_labels)]
-                breakpoint()
                 x = np.array(full_im_size_means)[self.best_cluster_labels]
             x = self.apply_conv_layer(x,layer_being_processed)
         return total_num_clusters, layer_being_processed, total_weighted
@@ -90,7 +89,7 @@ class ComplexityMeasurer():
             x = PCA(50).fit_transform(x)
         if nz > 3:
             x = UMAP(min_dist=0,n_neighbors=50).fit_transform(x).squeeze()
-        if ARGS.verbose:
+        if ARGS.display_cluster_imgs:
             scatter_clusters(x,labels=None,show=True)
         N,nz = x.shape
         data_range_by_axis = x.max(axis=0) - x.min(axis=0)
@@ -113,7 +112,7 @@ class ComplexityMeasurer():
             self.hangover_GMM.precisions_cholesky_ = np.linalg.cholesky(self.hangover_GMM.precisions_)
             hangover_model_scores = -self.hangover_GMM._estimate_log_prob(x)[np.arange(len(x)),compress_labels(hangover_cluster_labels)[0]]
             hangover_neg_log_probs = hangover_model_scores * np.log2(np.e)
-        description_lens = []
+        neg_description_lens = []
         idxs_lens = []
         for nc in range(1,self.ncs_to_check):
             self.model = GMM(nc,n_init=self.n_cluster_inits)
@@ -134,10 +133,10 @@ class ComplexityMeasurer():
             outliers = ~np.logical_or(inliers,accounted_for_by_hangover_GMM)
             len_outliers = len_of_outlier * outliers.sum()
             total_description_len = model_len + idxs_len + residual_errors + len_hangovers + len_outliers
-            description_lens.append(total_description_len)
+            neg_description_lens.append(-total_description_len)
             idxs_lens.append(idxs_len)
             if self.verbose:
-                print(f'{nc}: {total_description_len:.1f}\tmodel: {model_len:.1f}\terror: {residual_errors:.1f}\thangover_errors: {accounted_for_by_hangover_GMM.sum()} {len_hangovers:.1f}\toutliers: {outliers.sum()} {len_outliers:.1f}\tidxs: {idxs_len:.1f}')
+                print(f'{nc}: {total_description_len:.1f}\tmodel: {model_len:.1f}\terr: {residual_errors:.1f}\therr: {accounted_for_by_hangover_GMM.sum()} {len_hangovers:.1f}\touts: {outliers.sum()} {len_outliers:.1f}\tidxs: {idxs_len:.1f}')
             if total_description_len < best_dl:
                 best_dl = total_description_len
                 best_nc = nc
@@ -148,8 +147,9 @@ class ComplexityMeasurer():
             #from hdbcan import HDBSCAN
             #clusterer = HDBSCAN()
             #clusterer.fit(x)
+        if ARGS.display_cluster_imgs:
             scatter_clusters(x,self.best_cluster_labels.flatten(),show=True)
-        weighted_nc = np.dot(softmax(description_lens), idxs_lens)
+        weighted_nc = np.dot(softmax(neg_description_lens), idxs_lens)
         return best_nc, best_dl, weighted_nc
 
     def viz_cluster_labels(self,size):
@@ -222,6 +222,7 @@ elif ARGS.dset == 'rand':
     dset = np.random.rand(ARGS.num_ims,224,224,3)
 all_assembly_idxs = []
 all_levels = []
+all_weighteds = []
 net = models.resnet18(pretrained=~ARGS.no_pretrained)
 comp_meas = ComplexityMeasurer(verbose=ARGS.verbose,ncs_to_check=ARGS.ncs_to_check,resnet=net,n_cluster_inits=ARGS.n_cluster_inits,display_cluster_imgs=ARGS.display_cluster_imgs)
 mean=[0.485, 0.456, 0.406]
@@ -264,7 +265,10 @@ for i in range(ARGS.num_ims):
         print(f'Class: {label}\tAssemby num: {assembly_idx}\tLevel: {level}\tWeighted: {weighted:.3f}')
         all_assembly_idxs.append(assembly_idx)
         all_levels.append(level)
+        all_weighteds.append(weighted)
 mean_assembly_idx = np.array(all_assembly_idxs).mean()
 mean_level = np.array(all_levels).mean()
+mean_weighted = np.array(all_weighteds).mean()
 print(f'Mean assembly idx: {mean_assembly_idx}')
 print(f'Mean level idx: {mean_level}')
+print(f'Mean weighted: {mean_weighted}')
