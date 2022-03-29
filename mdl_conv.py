@@ -97,60 +97,43 @@ class ComplexityMeasurer():
         len_of_outlier = np.log2(data_range_by_axis).sum() # Omit the 32 here because implicitly omitted in the model log_prob computation
         best_dl = np.inf
         best_nc = -1
-        if self.layer_being_processed == 0 or len(np.unique(self.best_cluster_labels)) == 1:
-            hangover_neg_log_probs = np.inf*np.ones(len(x))
-        else:
-            hangover_cluster_labels = self.project_clusters()
-            means = np.stack([x[hangover_cluster_labels==i].mean(axis=0) for i in np.unique(hangover_cluster_labels)])
-            covars = np.stack([np.cov(x[hangover_cluster_labels==i].transpose(1,0)) for i in np.unique(hangover_cluster_labels)])
-            covars[(np.bincount(hangover_cluster_labels)==1)[np.bincount(hangover_cluster_labels)!=0]]=1e-6*np.identity(nz)
-            self.hangover_GMM = GMM(len(np.unique(hangover_cluster_labels)))
-            self.hangover_GMM.fit(np.random.rand(len(np.unique(self.best_cluster_labels)),x.shape[1]))
-            self.hangover_GMM.means_ = means
-            self.hangover_GMM.covariance_ = covars
-            self.hangover_GMM.precisions_ = np.linalg.inv(covars+np.identity(covars.shape[1])*1e-8)
-            self.hangover_GMM.precisions_cholesky_ = np.linalg.cholesky(self.hangover_GMM.precisions_)
-            hangover_model_scores = -self.hangover_GMM._estimate_log_prob(x)[np.arange(len(x)),compress_labels(hangover_cluster_labels)[0]]
-            hangover_neg_log_probs = hangover_model_scores * np.log2(np.e)
-        neg_description_lens = []
+        hangover_neg_log_probs = np.inf*np.ones(len(x))
+        neg_dls_by_dpoint = []
         idxs_lens = []
-        for nc in range(1,self.ncs_to_check):
+        all_rs = []
+        all_ts = []
+        for nc in range(1,self.ncs_to_check+1):
             self.model = GMM(nc,n_init=self.n_cluster_inits)
             self.cluster_labels = self.model.fit_predict(x)
             if len(np.unique(self.cluster_labels)) == nc-1:
-                print(f"only found {nc-1} clusters when looking for {nc}, terminating here")
-                break
+                print(f"only found {nc-1} clusters when looking for {nc}, terminating here"); break
             if nc > 1 and self.display_cluster_imgs:
                 self.viz_cluster_labels(x_as_img.shape[:2])
             model_len = nc*(len_of_each_cluster)
-            idxs_len = info_in_label_counts(self.cluster_labels)
+            idxs_len_per_cluster = np.log2(N) - np.log2(np.bincount(self.cluster_labels))
+            idxs_len_per_dpoint = idxs_len_per_cluster[self.cluster_labels]
             new_model_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
             neg_log_probs = new_model_scores * np.log2(np.e)
-            inliers = neg_log_probs<np.minimum(hangover_neg_log_probs,len_of_outlier)
-            residual_errors = neg_log_probs[inliers].sum()
-            accounted_for_by_hangover_GMM = np.logical_and((hangover_neg_log_probs<len_of_outlier), ~inliers)
-            len_hangovers = hangover_neg_log_probs[accounted_for_by_hangover_GMM].sum()
-            outliers = ~np.logical_or(inliers,accounted_for_by_hangover_GMM)
-            len_outliers = len_of_outlier * outliers.sum()
-            total_description_len = model_len + idxs_len + residual_errors + len_hangovers + len_outliers
-            neg_description_lens.append(-total_description_len)
-            idxs_lens.append(idxs_len)
-            if self.verbose:
-                print(f'{nc}: {total_description_len:.1f}\tmodel: {model_len:.1f}\terr: {residual_errors:.1f}\therr: {accounted_for_by_hangover_GMM.sum()} {len_hangovers:.1f}\touts: {outliers.sum()} {len_outliers:.1f}\tidxs: {idxs_len:.1f}')
-            if total_description_len < best_dl:
-                best_dl = total_description_len
-                best_nc = nc
-                self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:2])
-                self.best_model = self.model
+            outliers = neg_log_probs > len_of_outlier
+            residual_errors = neg_log_probs * ~outliers
+            len_outliers = len_of_outlier * outliers
+            dl_by_dpoint = residual_errors + len_outliers + idxs_len_per_dpoint + model_len/N
+            all_rs.append(residual_errors)
+            all_ts.append(dl_by_dpoint)
+            idxs_lens.append(idxs_len_per_dpoint)
+            neg_dls_by_dpoint.append(-dl_by_dpoint)
         if self.verbose:
             print(f'best dl is {best_dl:.2f} with {best_nc} clusters')
-            #from hdbcan import HDBSCAN
-            #clusterer = HDBSCAN()
-            #clusterer.fit(x)
         if ARGS.display_cluster_imgs:
             scatter_clusters(x,self.best_cluster_labels.flatten(),show=True)
-        weighted_nc = np.dot(softmax(neg_description_lens), idxs_lens)
-        return best_nc, best_dl, weighted_nc
+        idxs_lens_array = np.stack(idxs_lens,axis=1)
+        log_likelihood_per_dpoint = np.stack(neg_dls_by_dpoint,axis=1)
+        posterior_per_dpoint = softmax(log_likelihood_per_dpoint,axis=1)
+        votes_for_nc = posterior_per_dpoint.sum(axis=0)
+        weighted = (idxs_lens_array * posterior_per_dpoint).sum()
+        print(f"votes for nc: {votes_for_nc}")
+        print(f"weighted for layer {self.layer_being_processed}: {weighted}")
+        return best_nc, best_dl, weighted
 
     def viz_cluster_labels(self,size):
         nc = len(np.unique(self.cluster_labels))
