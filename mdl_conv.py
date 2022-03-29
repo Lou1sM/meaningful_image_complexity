@@ -1,7 +1,9 @@
 from PIL import Image
+from scipy.special import softmax
 from matplotlib.colors import BASE_COLORS
 from dl_utils.misc import scatter_clusters
 from dl_utils.tensor_funcs import numpyify
+from dl_utils.label_funcs import compress_labels
 from load_non_torch_dsets import load_rand
 from make_simple_imgs import get_simple_img
 from sklearn.manifold import TSNE
@@ -43,26 +45,26 @@ class ComplexityMeasurer():
     def interpret(self,given_x):
         x = np.copy(given_x)
         total_num_clusters = 0
+        total_weighted = 0
         self.get_smallest_increment(x)
         for layer_being_processed in range(6):
+            if (x.shape[0]-1)*(x.shape[1]-1) < 50:
+                break
             self.layer_being_processed = layer_being_processed
             if self.verbose:
                 print(f'applying cl to make im size {x.shape}')
-            num_clusters_at_this_level, dl = self.mdl_cluster(x)
+            num_clusters_at_this_level, dl, weighted = self.mdl_cluster(x)
             if self.verbose:
                 print(f'num clusters at level {layer_being_processed}: {num_clusters_at_this_level}')
-            if num_clusters_at_this_level == 1:
-                break
             total_num_clusters += num_clusters_at_this_level
-            if (x.shape[0]-1)*(x.shape[1]-1) < 20:
-                break
+            total_weighted += weighted
             if ARGS.centroidify:
                 full_im_size_means = [x[self.best_cluster_labels==c].mean(axis=0)
                     for c in np.unique(self.best_cluster_labels)]
                 breakpoint()
                 x = np.array(full_im_size_means)[self.best_cluster_labels]
             x = self.apply_conv_layer(x,layer_being_processed)
-        return total_num_clusters, layer_being_processed
+        return total_num_clusters, layer_being_processed, total_weighted
 
     def get_smallest_increment(self,x):
         sx = sorted(x.flatten())
@@ -87,45 +89,42 @@ class ComplexityMeasurer():
         if nz > 50:
             x = PCA(50).fit_transform(x)
         if nz > 3:
-            #umap_neighbours = (30*len(x))//70000
-            #x = TSNE(2,init='pca',learning_rate='auto').fit_transform(x)
             x = UMAP(min_dist=0,n_neighbors=50).fit_transform(x).squeeze()
+        if ARGS.verbose:
             scatter_clusters(x,labels=None,show=True)
         N,nz = x.shape
-        data_range = x.max() - x.min()
-        if self.verbose:
-            print(f'drange: {data_range:.3f} prec: {self.prec:.3f},nz:{nz}')
-        len_of_each_cluster = nz + (nz*(nz+1)/2) * (np.log2(data_range) + 32) # Float precision
-        len_of_outlier = nz * np.log2(data_range) # Omit the 32 here because implicitly omitted in the model log_prob computation
+        data_range_by_axis = x.max(axis=0) - x.min(axis=0)
+        len_of_each_cluster = (nz+1)/2 * (np.log2(data_range_by_axis).sum() + 32) # Float precision
+        len_of_outlier = np.log2(data_range_by_axis).sum() # Omit the 32 here because implicitly omitted in the model log_prob computation
         best_dl = np.inf
         best_nc = -1
-        if self.layer_being_processed == 0:
+        if self.layer_being_processed == 0 or len(np.unique(self.best_cluster_labels)) == 1:
             hangover_neg_log_probs = np.inf*np.ones(len(x))
         else:
             hangover_cluster_labels = self.project_clusters()
             means = np.stack([x[hangover_cluster_labels==i].mean(axis=0) for i in np.unique(hangover_cluster_labels)])
             covars = np.stack([np.cov(x[hangover_cluster_labels==i].transpose(1,0)) for i in np.unique(hangover_cluster_labels)])
+            covars[(np.bincount(hangover_cluster_labels)==1)[np.bincount(hangover_cluster_labels)!=0]]=1e-6*np.identity(nz)
             self.hangover_GMM = GMM(len(np.unique(hangover_cluster_labels)))
             self.hangover_GMM.fit(np.random.rand(len(np.unique(self.best_cluster_labels)),x.shape[1]))
             self.hangover_GMM.means_ = means
             self.hangover_GMM.covariance_ = covars
             self.hangover_GMM.precisions_ = np.linalg.inv(covars+np.identity(covars.shape[1])*1e-8)
             self.hangover_GMM.precisions_cholesky_ = np.linalg.cholesky(self.hangover_GMM.precisions_)
-            hangover_model_scores = -self.hangover_GMM._estimate_log_prob(x)[np.arange(len(x)),hangover_cluster_labels]
+            hangover_model_scores = -self.hangover_GMM._estimate_log_prob(x)[np.arange(len(x)),compress_labels(hangover_cluster_labels)[0]]
             hangover_neg_log_probs = hangover_model_scores * np.log2(np.e)
+        description_lens = []
+        idxs_lens = []
         for nc in range(1,self.ncs_to_check):
             self.model = GMM(nc,n_init=self.n_cluster_inits)
             self.cluster_labels = self.model.fit_predict(x)
             if len(np.unique(self.cluster_labels)) == nc-1:
                 print(f"only found {nc-1} clusters when looking for {nc}, terminating here")
-                return nc-1, best_dl
+                break
             if nc > 1 and self.display_cluster_imgs:
                 self.viz_cluster_labels(x_as_img.shape[:2])
             model_len = nc*(len_of_each_cluster)
-            #indices_len = N * np.log2(nc)
-            indices_len = info_in_label_counts(self.cluster_labels)
-            #if nc > 1 and self.layer_being_processed > 0:
-                #breakpoint()
+            idxs_len = info_in_label_counts(self.cluster_labels)
             new_model_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
             neg_log_probs = new_model_scores * np.log2(np.e)
             inliers = neg_log_probs<np.minimum(hangover_neg_log_probs,len_of_outlier)
@@ -134,9 +133,11 @@ class ComplexityMeasurer():
             len_hangovers = hangover_neg_log_probs[accounted_for_by_hangover_GMM].sum()
             outliers = ~np.logical_or(inliers,accounted_for_by_hangover_GMM)
             len_outliers = len_of_outlier * outliers.sum()
-            total_description_len = model_len + indices_len + residual_errors + len_hangovers + len_outliers
+            total_description_len = model_len + idxs_len + residual_errors + len_hangovers + len_outliers
+            description_lens.append(total_description_len)
+            idxs_lens.append(idxs_len)
             if self.verbose:
-                print(f'{nc}: {total_description_len:.1f}\tmodel: {model_len:.1f}\terror: {residual_errors:.1f}\thangover_errors: {accounted_for_by_hangover_GMM.sum()} {len_hangovers:.1f}\toutliers: {outliers.sum()} {len_outliers:.1f}\tidxs: {indices_len:.1f}')
+                print(f'{nc}: {total_description_len:.1f}\tmodel: {model_len:.1f}\terror: {residual_errors:.1f}\thangover_errors: {accounted_for_by_hangover_GMM.sum()} {len_hangovers:.1f}\toutliers: {outliers.sum()} {len_outliers:.1f}\tidxs: {idxs_len:.1f}')
             if total_description_len < best_dl:
                 best_dl = total_description_len
                 best_nc = nc
@@ -144,12 +145,12 @@ class ComplexityMeasurer():
                 self.best_model = self.model
         if self.verbose:
             print(f'best dl is {best_dl:.2f} with {best_nc} clusters')
-            breakpoint()
             #from hdbcan import HDBSCAN
             #clusterer = HDBSCAN()
             #clusterer.fit(x)
             scatter_clusters(x,self.best_cluster_labels.flatten(),show=True)
-        return best_nc, best_dl
+        weighted_nc = np.dot(softmax(description_lens), idxs_lens)
+        return best_nc, best_dl, weighted_nc
 
     def viz_cluster_labels(self,size):
         nc = len(np.unique(self.cluster_labels))
@@ -166,11 +167,6 @@ class ComplexityMeasurer():
                 torch_x = torch_x.unsqueeze(0)
             layer_to_apply = self.layers[layer_num] if custom_cnvl == 'none' else custom_cnvl
             torch_x = layer_to_apply(torch_x)
-            #nin = torch_x.shape[1]
-            #cnvl = nn.Conv2d(nin, 2*nin, 3, device=torch_x.device)
-            #torch_x = cnvl(torch_x)
-            #torch_x = F.max_pool2d(torch_x,2)
-            #torch_x = F.relu(torch_x)
             return numpyify(torch_x.squeeze(0).transpose(0,2))
         except Exception as e:
             print(e)
@@ -232,11 +228,13 @@ mean=[0.485, 0.456, 0.406]
 std=[0.229, 0.224, 0.225]
 for i in range(ARGS.num_ims):
     if ARGS.dset == 'im':
-        im, label = load_rand('imagenette',~ARGS.no_resize)/255
+        im, label = load_rand('imagenette',~ARGS.no_resize)
+        im = im/255
         if im.ndim == 2:
             im = np.resize(im,(*(im.shape),1))
     elif ARGS.dset == 'dtd':
-        im, label = load_rand('dtd',~ARGS.no_resize)/255
+        im, label = load_rand('dtd',~ARGS.no_resize)
+        im /= 255
     elif ARGS.dset == 'simp':
         #label = np.random.choice(('stripes','halves'))
         label = 'halves'
@@ -255,16 +253,15 @@ for i in range(ARGS.num_ims):
         label = dset.targets[i]
     if ARGS.display_cluster_imgs:
         plt.imshow(im);plt.show()
-    #im = im/255
     im = (im-mean)/std
     if ARGS.conv_abl:
         comp_meas.get_smallest_increment(im)
-        nc_in_image_itself,_ = comp_meas.mdl_cluster(im)
+        nc_in_image_itself,_,weighted = comp_meas.mdl_cluster(im)
         print(f'Class: {label}\tNC in image itself: {nc_in_image_itself}')
         all_assembly_idxs.append(nc_in_image_itself)
     else:
-        assembly_idx,level = comp_meas.interpret(im)
-        print(f'Class: {label}\tAssemby num: {assembly_idx}\tLevel: {level}')
+        assembly_idx,level,weighted  = comp_meas.interpret(im)
+        print(f'Class: {label}\tAssemby num: {assembly_idx}\tLevel: {level}\tWeighted: {weighted:.3f}')
         all_assembly_idxs.append(assembly_idx)
         all_levels.append(level)
 mean_assembly_idx = np.array(all_assembly_idxs).mean()
