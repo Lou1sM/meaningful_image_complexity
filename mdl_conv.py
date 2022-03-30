@@ -54,8 +54,6 @@ class ComplexityMeasurer():
             if self.verbose:
                 print(f'applying cl to make im size {x.shape}')
             num_clusters_at_this_level, dl, weighted = self.mdl_cluster(x)
-            if self.verbose:
-                print(f'num clusters at level {layer_being_processed}: {num_clusters_at_this_level}')
             total_num_clusters += num_clusters_at_this_level
             total_weighted += weighted
             if ARGS.centroidify:
@@ -118,12 +116,12 @@ class ComplexityMeasurer():
             residual_errors = neg_log_probs * ~outliers
             len_outliers = len_of_outlier * outliers
             dl_by_dpoint = residual_errors + len_outliers + idxs_len_per_dpoint + model_len/N
+            if self.verbose:
+                print(f'{nc} {dl_by_dpoint.sum()}\tMod: {model_len}\tErr: {residual_errors.sum()}\tO: {outliers.sum()} {len_outliers.sum()}')
             all_rs.append(residual_errors)
             all_ts.append(dl_by_dpoint)
             idxs_lens.append(idxs_len_per_dpoint)
             neg_dls_by_dpoint.append(-dl_by_dpoint)
-        if self.verbose:
-            print(f'best dl is {best_dl:.2f} with {best_nc} clusters')
         if ARGS.display_cluster_imgs:
             scatter_clusters(x,self.best_cluster_labels.flatten(),show=True)
         idxs_lens_array = np.stack(idxs_lens,axis=1)
@@ -131,8 +129,8 @@ class ComplexityMeasurer():
         posterior_per_dpoint = softmax(log_likelihood_per_dpoint,axis=1)
         votes_for_nc = posterior_per_dpoint.sum(axis=0)
         weighted = (idxs_lens_array * posterior_per_dpoint).sum()
-        print(f"votes for nc: {votes_for_nc}")
-        print(f"weighted for layer {self.layer_being_processed}: {weighted}")
+        #print(f"votes for nc: {votes_for_nc}")
+        print(f"weighted for layer {self.layer_being_processed}: {weighted:.2f}")
         return best_nc, best_dl, weighted
 
     def viz_cluster_labels(self,size):
@@ -230,10 +228,11 @@ for i in range(ARGS.num_ims):
     else:
         if ARGS.dset == 'cifar':
             im = dset.data[i]/255
+            im = np.array(Image.fromarray(im).resize((224,224)))
         elif ARGS.dset == 'mnist':
-            im = numpyify(dset.data[i].unsqueeze(2))
-        im = np.array(dset.data[i])
-        im = np.array(Image.fromarray(im).resize((224,224)))
+            im = numpyify(dset.data[i])
+            im = np.array(Image.fromarray(im).resize((224,224)))
+            im = np.expand_dims(im,2)
         label = dset.targets[i]
     if ARGS.display_cluster_imgs:
         plt.imshow(im);plt.show()
@@ -252,6 +251,4 @@ for i in range(ARGS.num_ims):
 mean_assembly_idx = np.array(all_assembly_idxs).mean()
 mean_level = np.array(all_levels).mean()
 mean_weighted = np.array(all_weighteds).mean()
-print(f'Mean assembly idx: {mean_assembly_idx}')
-print(f'Mean level idx: {mean_level}')
-print(f'Mean weighted: {mean_weighted}')
+print(f'Mean weighted: {mean_weighted:.3f}')
