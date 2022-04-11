@@ -2,33 +2,20 @@ from scipy.special import softmax
 from matplotlib.colors import BASE_COLORS
 from dl_utils.misc import scatter_clusters
 from dl_utils.tensor_funcs import numpyify
-from dl_utils.label_funcs import compress_labels
-from load_non_torch_dsets import load_rand
-from make_simple_imgs import get_simple_img
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture as GMM
-from torchvision import models
-from torchvision.transforms import ToTensor
-import argparse
 import matplotlib.pyplot as plt
 import numpy as np
-import sklearn.datasets as data
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torchvision
 from umap import UMAP
-
-import numpy as np
-import scipy
 
 
 PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
     def __init__(self,verbose,ncs_to_check,resnet,n_cluster_inits,display_cluster_imgs,
-                        patch,conv_abl,is_choose_model_per_dpoint,nz,alg_nz,centroidify,
-                        **kwargs):
+                 patch,conv_abl,is_choose_model_per_dpoint,nz,alg_nz,centroidify,**kwargs):
 
         self.verbose = verbose
         self.n_cluster_inits = n_cluster_inits
@@ -70,7 +57,7 @@ class ComplexityMeasurer():
             total_weighted += weighted
             if self.centroidify:
                 full_im_size_means = [x[self.best_cluster_labels==c].mean(axis=0)
-                    for c in np.unique(self.best_cluster_labels)]
+                                    for c in np.unique(self.best_cluster_labels)]
                 x = np.array(full_im_size_means)[self.best_cluster_labels]
             x = self.apply_conv_layer(x,layer_being_processed)
         return total_num_clusters, layer_being_processed, total_weighted
@@ -111,7 +98,6 @@ class ComplexityMeasurer():
         len_of_outlier = np.log2(data_range_by_axis).sum() # Omit the 32 here because implicitly omitted in the model log_prob computation
         best_dl = np.inf
         best_nc = -1
-        hangover_neg_log_probs = np.inf*np.ones(len(x))
         neg_dls_by_dpoint = []
         idxs_lens = []
         all_rs = []
@@ -145,7 +131,6 @@ class ComplexityMeasurer():
         log_likelihood_per_dpoint = np.stack(neg_dls_by_dpoint,axis=1)
         if self.is_choose_model_per_dpoint:
             posterior_per_dpoint = softmax(log_likelihood_per_dpoint,axis=1)
-            votes_for_nc = posterior_per_dpoint.sum(axis=0)
             weighted = (idxs_lens_array * posterior_per_dpoint).sum()
         else:
             posterior_for_dset = softmax(log_likelihood_per_dpoint.sum(axis=0))
@@ -194,6 +179,7 @@ def patch_averages(a):
     try:
         padded = np.pad(a,1)[:,:,1:-1]
     except Exception as e:
+        print(e)
         breakpoint()
     summed = padded[:-1,:-1] + padded[:-1,1:] + padded[1:,:-1] + padded[1:,1:]
     return (summed/4)[1:-1,1:-1]

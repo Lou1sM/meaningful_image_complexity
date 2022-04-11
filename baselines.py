@@ -8,19 +8,18 @@ def rgb2gray(rgb):
     gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
     return gray
 
+def boxcount(im_to_reduce, box_size):
+    y_reduce_idxs = np.arange(0, im_to_reduce.shape[0], box_size)
+    x_reduce_idxs = np.arange(0, im_to_reduce.shape[1], box_size)
+    y_axis_reduced = np.add.reduceat(im_to_reduce, y_reduce_idxs, axis=0)
+    reduced = np.add.reduceat(y_axis_reduced, x_reduce_idxs, axis=1)
+
+    # We count non-empty (0) and non-full boxes (k*k)
+    return len(np.where((reduced > 0) & (reduced < box_size**2))[0])
+
 def fractal_dimension(Z_, threshold=None):
     threshold = .5
     assert Z_.ndim == 2
-
-    # From https://github.com/rougier/numpy-100 (#87)
-    def boxcount(Z, k):
-        S = np.add.reduceat(
-            np.add.reduceat(Z, np.arange(0, Z.shape[0], k), axis=0),
-                               np.arange(0, Z.shape[1], k), axis=1)
-
-        # We count non-empty (0) and non-full boxes (k*k)
-        return len(np.where((S > 0) & (S < k*k))[0])
-
     Z = (Z_ < threshold)
     p = min(Z.shape)
 
