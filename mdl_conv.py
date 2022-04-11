@@ -1,4 +1,3 @@
-from PIL import Image
 from scipy.special import softmax
 from matplotlib.colors import BASE_COLORS
 from dl_utils.misc import scatter_clusters
@@ -21,14 +20,27 @@ import torch.nn.functional as F
 import torchvision
 from umap import UMAP
 
+import numpy as np
+import scipy
+
 
 PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
-    def __init__(self,verbose,ncs_to_check,resnet,n_cluster_inits,display_cluster_imgs):
+    def __init__(self,verbose,ncs_to_check,resnet,n_cluster_inits,display_cluster_imgs,
+                        patch,conv_abl,is_choose_model_per_dpoint,nz,alg_nz,centroidify,
+                        **kwargs):
+
         self.verbose = verbose
-        self.display_cluster_imgs = display_cluster_imgs
         self.n_cluster_inits = n_cluster_inits
+        self.display_cluster_imgs = display_cluster_imgs
+        self.patch = patch
+        self.conv_abl = conv_abl
+        self.is_choose_model_per_dpoint = is_choose_model_per_dpoint
         self.ncs_to_check = ncs_to_check
+        self.nz = nz
+        self.alg_nz = alg_nz
+        self.centroidify = centroidify
+
         self.layer1 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu,resnet.maxpool)
         self.layer2 = resnet.layer1
         self.layer3 = resnet.layer2
@@ -56,7 +68,7 @@ class ComplexityMeasurer():
             num_clusters_at_this_level, dl, weighted = self.mdl_cluster(x)
             total_num_clusters += num_clusters_at_this_level
             total_weighted += weighted
-            if ARGS.centroidify:
+            if self.centroidify:
                 full_im_size_means = [x[self.best_cluster_labels==c].mean(axis=0)
                     for c in np.unique(self.best_cluster_labels)]
                 x = np.array(full_im_size_means)[self.best_cluster_labels]
@@ -79,16 +91,20 @@ class ComplexityMeasurer():
         return proj_clusters_as_img.flatten().round().astype(int)
 
     def mdl_cluster(self,x_as_img):
-        x = patch_averages(x_as_img) if ARGS.patch else x_as_img
+        x = patch_averages(x_as_img) if self.patch else x_as_img
         x = x.reshape(-1,x.shape[-1])
         assert x.ndim == 2
         N,nz = x.shape
         if nz > 50:
             x = PCA(50).fit_transform(x)
         if nz > 3:
-            x = UMAP(min_dist=0,n_neighbors=50).fit_transform(x).squeeze()
-        if ARGS.display_cluster_imgs:
-            scatter_clusters(x,labels=None,show=True)
+            if self.alg_nz == 'pca':
+                dim_reducer = PCA(50)
+            elif self.alg_nz == 'umap':
+                dim_reducer = UMAP(n_components=self.nz,min_dist=0,n_neighbors=50)
+            elif self.alg_nz == 'tsne':
+                dim_reducer = TSNE(n_components=self.nz, learning_rate='auto',init='pca')
+            x = dim_reducer.fit_transform(x).squeeze()
         N,nz = x.shape
         data_range_by_axis = x.max(axis=0) - x.min(axis=0)
         len_of_each_cluster = (nz+1)/2 * (np.log2(data_range_by_axis).sum() + 32) # Float precision
@@ -106,7 +122,7 @@ class ComplexityMeasurer():
             if len(np.unique(self.cluster_labels)) == nc-1:
                 print(f"only found {nc-1} clusters when looking for {nc}, terminating here"); break
             if nc > 1 and self.display_cluster_imgs:
-                self.viz_cluster_labels(x_as_img.shape[:2])
+                scatter_clusters(x,self.best_cluster_labels,show=True)
             model_len = nc*(len_of_each_cluster)
             idxs_len_per_cluster = np.log2(N) - np.log2(np.bincount(self.cluster_labels))
             idxs_len_per_dpoint = idxs_len_per_cluster[self.cluster_labels]
@@ -117,26 +133,32 @@ class ComplexityMeasurer():
             len_outliers = len_of_outlier * outliers
             dl_by_dpoint = residual_errors + len_outliers + idxs_len_per_dpoint + model_len/N
             if self.verbose:
-                print(f'{nc} {dl_by_dpoint.sum()}\tMod: {model_len}\tErr: {residual_errors.sum()}\tO: {outliers.sum()} {len_outliers.sum()}')
+                print(f'{nc} {dl_by_dpoint.sum()}\tMod: {model_len:.3f}\tErr: {residual_errors.sum():.3f}\tO: {outliers.sum()} {len_outliers.sum():.3f}')
             all_rs.append(residual_errors)
             all_ts.append(dl_by_dpoint)
             idxs_lens.append(idxs_len_per_dpoint)
             neg_dls_by_dpoint.append(-dl_by_dpoint)
-        if ARGS.display_cluster_imgs:
-            scatter_clusters(x,self.best_cluster_labels.flatten(),show=True)
+            if dl_by_dpoint.sum() < best_dl:
+                best_dl = dl_by_dpoint.sum()
+                self.best_cluster_labels = self.cluster_labels
         idxs_lens_array = np.stack(idxs_lens,axis=1)
         log_likelihood_per_dpoint = np.stack(neg_dls_by_dpoint,axis=1)
-        posterior_per_dpoint = softmax(log_likelihood_per_dpoint,axis=1)
-        votes_for_nc = posterior_per_dpoint.sum(axis=0)
-        weighted = (idxs_lens_array * posterior_per_dpoint).sum()
+        if self.is_choose_model_per_dpoint:
+            posterior_per_dpoint = softmax(log_likelihood_per_dpoint,axis=1)
+            votes_for_nc = posterior_per_dpoint.sum(axis=0)
+            weighted = (idxs_lens_array * posterior_per_dpoint).sum()
+        else:
+            posterior_for_dset = softmax(log_likelihood_per_dpoint.sum(axis=0))
+            weighted = np.dot(idxs_lens_array.sum(axis=0), posterior_for_dset)
         #print(f"votes for nc: {votes_for_nc}")
-        print(f"weighted for layer {self.layer_being_processed}: {weighted:.2f}")
+        if not self.conv_abl:
+            print(f"weighted for layer {self.layer_being_processed}: {weighted:.2f}")
         return best_nc, best_dl, weighted
 
     def viz_cluster_labels(self,size):
-        nc = len(np.unique(self.cluster_labels))
+        nc = len(np.unique(self.best_cluster_labels))
         pallete = PALETTE[:nc]
-        coloured_clabs = np.array(pallete)[self.cluster_labels]
+        coloured_clabs = np.array(pallete)[self.best_cluster_labels]
         coloured_clabs = np.resize(coloured_clabs,(*size,3))
         plt.imshow(coloured_clabs); plt.show()
 
@@ -177,78 +199,5 @@ def patch_averages(a):
     return (summed/4)[1:-1,1:-1]
 
 def torch_min(t,val):
+    """return the minimum of val (float) and t (tensor), with val broadcast"""
     return torch.minimum(t,val*torch.ones_like(t))
-
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--no_resize',action='store_true')
-parser.add_argument('--display_cluster_imgs',action='store_true')
-parser.add_argument('--patch',action='store_true')
-parser.add_argument('--no_pretrained',action='store_true')
-parser.add_argument('--verbose','-v',action='store_true')
-parser.add_argument('--display_images',action='store_true')
-parser.add_argument('--centroidify',action='store_true')
-parser.add_argument('--conv_abl',action='store_true')
-parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand','dtd','simp'],default='simp')
-parser.add_argument('--num_ims',type=int,default=1)
-parser.add_argument('--ncs_to_check',type=int,default=10)
-parser.add_argument('--n_cluster_inits',type=int,default=1)
-ARGS = parser.parse_args()
-
-if ARGS.dset == 'cifar':
-    dset = torchvision.datasets.CIFAR10(root='/home/louis/datasets',download=True,train=True)
-elif ARGS.dset == 'mnist':
-    dset = torchvision.datasets.MNIST(root='/home/louis/datasets',train=False,download=True)
-elif ARGS.dset == 'rand':
-    dset = np.random.rand(ARGS.num_ims,224,224,3)
-all_assembly_idxs = []
-all_levels = []
-all_weighteds = []
-net = models.resnet18(pretrained=~ARGS.no_pretrained)
-comp_meas = ComplexityMeasurer(verbose=ARGS.verbose,ncs_to_check=ARGS.ncs_to_check,resnet=net,n_cluster_inits=ARGS.n_cluster_inits,display_cluster_imgs=ARGS.display_cluster_imgs)
-mean=[0.485, 0.456, 0.406]
-std=[0.229, 0.224, 0.225]
-for i in range(ARGS.num_ims):
-    if ARGS.dset == 'im':
-        im, label = load_rand('imagenette',~ARGS.no_resize)
-        im = im/255
-        if im.ndim == 2:
-            im = np.resize(im,(*(im.shape),1))
-    elif ARGS.dset == 'dtd':
-        im, label = load_rand('dtd',~ARGS.no_resize)
-        im /= 255
-    elif ARGS.dset == 'simp':
-        #label = np.random.choice(('stripes','halves'))
-        label = 'halves'
-        slope = np.random.rand()+.5
-        im = get_simple_img(label,slope,line_thickness=5)
-    elif ARGS.dset == 'rand':
-        im = dset[i]
-        label = 'none'
-    else:
-        if ARGS.dset == 'cifar':
-            im = dset.data[i]/255
-            im = np.array(Image.fromarray(im).resize((224,224)))
-        elif ARGS.dset == 'mnist':
-            im = numpyify(dset.data[i])
-            im = np.array(Image.fromarray(im).resize((224,224)))
-            im = np.expand_dims(im,2)
-        label = dset.targets[i]
-    if ARGS.display_cluster_imgs:
-        plt.imshow(im);plt.show()
-    im = (im-mean)/std
-    if ARGS.conv_abl:
-        comp_meas.get_smallest_increment(im)
-        nc_in_image_itself,_,weighted = comp_meas.mdl_cluster(im)
-        print(f'Class: {label}\tNC in image itself: {nc_in_image_itself}')
-        all_assembly_idxs.append(nc_in_image_itself)
-    else:
-        assembly_idx,level,weighted  = comp_meas.interpret(im)
-        print(f'Class: {label}\tAssemby num: {assembly_idx}\tLevel: {level}\tWeighted: {weighted:.3f}')
-        all_assembly_idxs.append(assembly_idx)
-        all_levels.append(level)
-        all_weighteds.append(weighted)
-mean_assembly_idx = np.array(all_assembly_idxs).mean()
-mean_level = np.array(all_levels).mean()
-mean_weighted = np.array(all_weighteds).mean()
-print(f'Mean weighted: {mean_weighted:.3f}')
