@@ -17,7 +17,7 @@ def boxcount(im_to_reduce, box_size):
     # We count non-empty (0) and non-full boxes (k*k)
     return len(np.where((reduced > 0) & (reduced < box_size**2))[0])
 
-def fractal_dimension(Z_, threshold=None):
+def compute_fractal_dimension(Z_, threshold=None):
     threshold = .5
     assert Z_.ndim == 2
     Z = (Z_ < threshold)

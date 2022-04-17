@@ -41,7 +41,7 @@ class ComplexityMeasurer():
         self.dummy_initial_layer = nn.Sequential(make_dummy_layer(7,2,3),nn.MaxPool2d(3,2,1,dilation=1,ceil_mode=False))
         self.dummy_downsample_rlayer = make_dummy_layer(3,2,1)
 
-    def interpret(self,given_x):
+    def interpret(self,given_x,is_conv_abl):
         x = np.copy(given_x)
         total_num_clusters = 0
         total_weighted = 0
@@ -55,6 +55,7 @@ class ComplexityMeasurer():
             num_clusters_at_this_level, dl, weighted = self.mdl_cluster(x)
             total_num_clusters += num_clusters_at_this_level
             total_weighted += weighted
+            if is_conv_abl: break
             if self.centroidify:
                 full_im_size_means = [x[self.best_cluster_labels==c].mean(axis=0)
                                     for c in np.unique(self.best_cluster_labels)]
