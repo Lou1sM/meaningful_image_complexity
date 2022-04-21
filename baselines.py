@@ -40,7 +40,6 @@ def compute_fractal_dimension(Z_, threshold=None):
     counts = []
     for size in sizes:
         counts.append(boxcount(Z, size))
-    print(counts)
 
     coeffs = np.polyfit(np.log(sizes), np.log(counts), 1)
     return -coeffs[0]
@@ -55,6 +54,8 @@ def jpg_compressed_size(im):
     x = im - im.min()
     x = im/im.max()
     x = (x*255).astype(np.uint8)
+    if x.shape[2] == 1:
+        x = np.squeeze(x,2)
     pim = Image.fromarray(x)
     compressed = BytesIO()
     pim.save(compressed,format='jpeg')

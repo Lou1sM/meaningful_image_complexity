@@ -15,13 +15,14 @@ from umap import UMAP
 PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
     def __init__(self,verbose,ncs_to_check,resnet,n_cluster_inits,display_cluster_imgs,
-                 patch,conv_abl,is_choose_model_per_dpoint,nz,alg_nz,centroidify,**kwargs):
+                 patch,use_conv,is_choose_model_per_dpoint,nz,alg_nz,centroidify,concat_patches,**kwargs):
 
         self.verbose = verbose
         self.n_cluster_inits = n_cluster_inits
         self.display_cluster_imgs = display_cluster_imgs
         self.patch = patch
-        self.conv_abl = conv_abl
+        self.use_conv = use_conv
+        self.concat_patches = concat_patches
         self.is_choose_model_per_dpoint = is_choose_model_per_dpoint
         self.ncs_to_check = ncs_to_check
         self.nz = nz
@@ -41,7 +42,7 @@ class ComplexityMeasurer():
         self.dummy_initial_layer = nn.Sequential(make_dummy_layer(7,2,3),nn.MaxPool2d(3,2,1,dilation=1,ceil_mode=False))
         self.dummy_downsample_rlayer = make_dummy_layer(3,2,1)
 
-    def interpret(self,given_x,is_conv_abl):
+    def interpret(self,given_x):
         x = np.copy(given_x)
         total_num_clusters = 0
         total_weighted = 0
@@ -55,12 +56,18 @@ class ComplexityMeasurer():
             num_clusters_at_this_level, dl, weighted = self.mdl_cluster(x)
             total_num_clusters += num_clusters_at_this_level
             total_weighted += weighted
-            if is_conv_abl: break
             if self.centroidify:
                 full_im_size_means = [x[self.best_cluster_labels==c].mean(axis=0)
                                     for c in np.unique(self.best_cluster_labels)]
                 x = np.array(full_im_size_means)[self.best_cluster_labels]
-            x = self.apply_conv_layer(x,layer_being_processed)
+            if self.use_conv:
+                x = self.apply_conv_layer(x,layer_being_processed)
+            elif self.concat_patches:
+                patch_size = 2**layer_being_processed
+                x = patch_concats(x,patch_size)
+                print(patch_size,x.shape)
+            else:
+                break
         return total_num_clusters, layer_being_processed, total_weighted
 
     def get_smallest_increment(self,x):
@@ -80,14 +87,12 @@ class ComplexityMeasurer():
 
     def mdl_cluster(self,x_as_img):
         x = patch_averages(x_as_img) if self.patch else x_as_img
-        x = patch_concats(x)
         x = x.reshape(-1,x.shape[-1])
         assert x.ndim == 2
         N,nz = x.shape
         if nz > 50:
             x = PCA(50).fit_transform(x)
         if nz > 3:
-            dim_to_reduce_to = min(50,nz//2)
             if self.alg_nz == 'pca':
                 dim_reducer = PCA(self.nz)
             elif self.alg_nz == 'umap':
@@ -139,7 +144,7 @@ class ComplexityMeasurer():
             posterior_for_dset = softmax(log_likelihood_per_dpoint.sum(axis=0))
             weighted = np.dot(idxs_lens_array.sum(axis=0), posterior_for_dset)
         #print(f"votes for nc: {votes_for_nc}")
-        if not self.conv_abl:
+        if self.use_conv or self.concat_patches:
             print(f"weighted for layer {self.layer_being_processed}: {weighted:.2f}")
         return best_nc, best_dl, weighted
 
@@ -178,15 +183,10 @@ def make_dummy_layer(ks,stride,padding):
 def viz_proc_im(x):
     plt.imshow(x.sum(axis=2)); plt.show()
 
-def patch_concats(a):
-    try:
-        padded = np.pad(a,1)[:,:,1:-1]
-    except Exception as e:
-        print(e)
-        breakpoint()
-    different_shifts = [padded[:-1,:-1], padded[:-1,1:], padded[1:,:-1], padded[1:,1:]]
+def patch_concats(a,ps):
+    different_shifts = [a[:-ps,:-ps], a[:-ps,ps:], a[ps:,:-ps], a[ps:,ps:]]
     concatted = np.concatenate(different_shifts,axis=2)
-    return concatted[2:-2,2:-2]
+    return concatted
 
 def patch_averages(a):
     try:

@@ -20,9 +20,9 @@ parser.add_argument('--display_cluster_imgs',action='store_true')
 parser.add_argument('--patch',action='store_true')
 parser.add_argument('--no_pretrained',action='store_true')
 parser.add_argument('--verbose','-v',action='store_true')
-#parser.add_argument('--display_images',action='store_true')
 parser.add_argument('--centroidify',action='store_true')
-parser.add_argument('--conv_abl',action='store_true')
+parser.add_argument('--use_conv',action='store_true')
+parser.add_argument('--concat_patches',action='store_true')
 parser.add_argument('--is_choose_model_per_dpoint',action='store_true')
 parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand','dtd','stripes','halves'],default='stripes')
 parser.add_argument('--num_ims',type=int,default=1)
@@ -44,7 +44,6 @@ all_weighteds = []
 net = models.resnet18(pretrained=not ARGS.no_pretrained)
 comp_meas_kwargs = ARGS.__dict__
 comp_meas = ComplexityMeasurer(resnet=net,**comp_meas_kwargs)
-#comp_meas = ComplexityMeasurer(verbose=ARGS.verbose,ncs_to_check=ARGS.ncs_to_check,resnet=net,n_cluster_inits=ARGS.n_cluster_inits,display_cluster_imgs=ARGS.display_cluster_imgs)
 mean=[0.485, 0.456, 0.406]
 std=[0.229, 0.224, 0.225]
 weighted_by_class = {}
@@ -86,25 +85,18 @@ for i in range(ARGS.num_ims):
         elif ARGS.dset == 'mnist':
             im = numpyify(dset.data[i])
             im = np.array(Image.fromarray(im).resize((224,224)))
-            im = np.expand_dims(im,2)
+            im = np.tile(np.expand_dims(im,2),(1,1,3))
         label = int(dset.targets[i])
     if ARGS.display_cluster_imgs:
         plt.imshow(im);plt.show()
-    im_normed = (im-mean)/std
+    #im_normed = (im-mean)/std
+    im_normed = im
     greyscale_im = rgb2gray(im)
     fractal_dim = compute_fractal_dimension(greyscale_im)
-    print("Minkowski–Bouligand dimension (computed): ", fractal_dim)
     im_unint8 = (greyscale_im*255).astype(np.uint8)
     gclm_ent = glcm_entropy(im_unint8)
-    print("GLCM entropy: ", gclm_ent)
     ent = shannon_entropy(im_unint8)
-    print("entropy: ", ent)
-    #if ARGS.conv_abl:
-        #comp_meas.get_smallest_increment(im_normed)
-        #nc_in_image_itself,_,bayes_mdl = comp_meas.mdl_cluster(im_normed)
-        #all_assembly_idxs.append(nc_in_image_itself)
-    #else:
-    assembly_idx,level,bayes_mdl = comp_meas.interpret(im_normed,ARGS.conv_abl)
+    assembly_idx,level,bayes_mdl = comp_meas.interpret(im_normed)
     all_assembly_idxs.append(assembly_idx)
     all_levels.append(level)
     all_weighteds.append(bayes_mdl)
