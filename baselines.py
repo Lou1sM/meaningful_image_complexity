@@ -1,5 +1,9 @@
 from skimage.feature import graycomatrix
 import numpy as np
+from PIL import Image
+from io import BytesIO
+from scipy import ndimage
+
 
 def rgb2gray(rgb):
     if rgb.shape[2] == 1:
@@ -46,3 +50,24 @@ def glcm_entropy(Z):
                       angles=[0], symmetric=True,
                       normed=True))
     return -np.sum(glcm*np.log2(glcm + (glcm==0)))
+
+def jpg_compressed_size(im):
+    x = im - im.min()
+    x = im/im.max()
+    x = (x*255).astype(np.uint8)
+    pim = Image.fromarray(x)
+    compressed = BytesIO()
+    pim.save(compressed,format='jpeg')
+    return compressed.getbuffer().nbytes
+
+def jpg_compression_ratio(im):
+    full_size = 8 * im.size
+    compressed_size = jpg_compressed_size(im)
+    return compressed_size/full_size
+
+def machado2015(im):
+    sob = ndimage.sobel(im)
+    return jpg_compression_ratio(sob)
+
+def khan2021(im):
+    return np.median(abs(np.fft.fft2((255*im).astype(np.uint8))))

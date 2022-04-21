@@ -80,14 +80,16 @@ class ComplexityMeasurer():
 
     def mdl_cluster(self,x_as_img):
         x = patch_averages(x_as_img) if self.patch else x_as_img
+        x = patch_concats(x)
         x = x.reshape(-1,x.shape[-1])
         assert x.ndim == 2
         N,nz = x.shape
         if nz > 50:
             x = PCA(50).fit_transform(x)
         if nz > 3:
+            dim_to_reduce_to = min(50,nz//2)
             if self.alg_nz == 'pca':
-                dim_reducer = PCA(50)
+                dim_reducer = PCA(self.nz)
             elif self.alg_nz == 'umap':
                 dim_reducer = UMAP(n_components=self.nz,min_dist=0,n_neighbors=50)
             elif self.alg_nz == 'tsne':
@@ -175,6 +177,16 @@ def make_dummy_layer(ks,stride,padding):
 
 def viz_proc_im(x):
     plt.imshow(x.sum(axis=2)); plt.show()
+
+def patch_concats(a):
+    try:
+        padded = np.pad(a,1)[:,:,1:-1]
+    except Exception as e:
+        print(e)
+        breakpoint()
+    different_shifts = [padded[:-1,:-1], padded[:-1,1:], padded[1:,:-1], padded[1:,1:]]
+    concatted = np.concatenate(different_shifts,axis=2)
+    return concatted[2:-2,2:-2]
 
 def patch_averages(a):
     try:

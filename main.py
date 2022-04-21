@@ -10,7 +10,7 @@ from load_non_torch_dsets import load_rand
 from create_simple_imgs import create_simple_img
 import matplotlib.pyplot as plt
 from dl_utils.tensor_funcs import numpyify
-from baselines import rgb2gray, compute_fractal_dimension, glcm_entropy
+from baselines import rgb2gray, compute_fractal_dimension, glcm_entropy, machado2015, jpg_compression_ratio, khan2021
 from skimage.measure import shannon_entropy
 
 
@@ -48,7 +48,7 @@ comp_meas = ComplexityMeasurer(resnet=net,**comp_meas_kwargs)
 mean=[0.485, 0.456, 0.406]
 std=[0.229, 0.224, 0.225]
 weighted_by_class = {}
-methods = ['mdl','gclm','fract','ent','ass']
+methods = ['mdl','gclm','fract','ent','ass','jpg','mach','khan']
 results_dict = {m:{} for m in methods}
 
 def append_or_add_key(d,key,val):
@@ -107,11 +107,18 @@ for i in range(ARGS.num_ims):
     assembly_idx,level,bayes_mdl = comp_meas.interpret(im_normed,ARGS.conv_abl)
     all_assembly_idxs.append(assembly_idx)
     all_levels.append(level)
+    all_weighteds.append(bayes_mdl)
+    jpg = jpg_compression_ratio(im)
+    mach = machado2015(im)
+    khan = khan2021(im)
     append_or_add_key(results_dict['mdl'],label,bayes_mdl)
     append_or_add_key(results_dict['ass'],label,assembly_idx)
     append_or_add_key(results_dict['gclm'],label,gclm_ent)
     append_or_add_key(results_dict['fract'],label,fractal_dim)
     append_or_add_key(results_dict['ent'],label,ent)
+    append_or_add_key(results_dict['jpg'],label,jpg)
+    append_or_add_key(results_dict['mach'],label,mach)
+    append_or_add_key(results_dict['khan'],label,khan)
 
 def build_innerxy_df(class_results_dict):
     dict_of_dicts = {}
@@ -128,10 +135,8 @@ mean_var_results = {method_k:{class_k:{'mean':np.array(v).mean(),'var':np.array(
 results_by_method = [pd.DataFrame(build_innerxy_df(d)).T for d in results_dict.values()]
 mi_df_for_this_dset = pd.concat(results_by_method,axis=0,keys=results_dict.keys())
 mi_df_for_this_dset.to_csv(f'experiments/{ARGS.dset}_results.csv')
-mi=pd.MultiIndex.from_product([methods,list(results_dict['mdl'])])
-pd.DataFrame(mean_var_results,columns=mi,index=['mean','var'])
+#print(mi_df_for_this_dset)
 mean_weighted = np.array(all_weighteds).mean()
-print()
 for k,v in weighted_by_class.items():
     print(f'{k}: {np.array(v).mean():.2f}')
 print(f'\nMean across all classes: {mean_weighted:.3f}')
