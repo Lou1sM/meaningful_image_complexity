@@ -17,9 +17,10 @@ class ComplexityMeasurer():
     def __init__(self,verbose,ncs_to_check,resnet,n_cluster_inits,
                     display_cluster_imgs,patch,use_conv,
                     is_choose_model_per_dpoint,nz,alg_nz,centroidify,
-                    concat_patches,skip_layers,**kwargs):
+                    concat_patches,skip_layers,subsample,**kwargs):
 
         self.verbose = verbose
+        self.subsample = subsample
         self.skip_layers = skip_layers
         self.n_cluster_inits = n_cluster_inits
         self.display_cluster_imgs = display_cluster_imgs
@@ -48,9 +49,9 @@ class ComplexityMeasurer():
     def interpret(self,given_x):
         x = np.copy(given_x)
         total_num_clusters = 0
-        total_weighted = 0
+        total_weighteds = []
         self.get_smallest_increment(x)
-        for layer_being_processed in range(6):
+        for layer_being_processed in range(4):
             if (x.shape[0]-1)*(x.shape[1]-1) < 50:
                 break
             self.layer_being_processed = layer_being_processed
@@ -61,7 +62,7 @@ class ComplexityMeasurer():
             else:
                 num_clusters_at_this_level, dl, weighted = self.mdl_cluster(x)
             total_num_clusters += num_clusters_at_this_level
-            total_weighted += weighted
+            total_weighteds.append(weighted)
             if self.centroidify:
                 full_im_size_means = [x[self.best_cluster_labels==c].mean(axis=0)
                                     for c in np.unique(self.best_cluster_labels)]
@@ -78,7 +79,7 @@ class ComplexityMeasurer():
                 print(patch_size,x.shape)
             else:
                 break
-        return total_num_clusters, layer_being_processed, total_weighted
+        return total_num_clusters, layer_being_processed, total_weighteds
 
     def get_smallest_increment(self,x):
         sx = sorted(x.flatten())
@@ -96,8 +97,14 @@ class ComplexityMeasurer():
         return proj_clusters_as_img.flatten().round().astype(int)
 
     def mdl_cluster(self,x_as_img):
-        x = patch_averages(x_as_img) if self.patch else x_as_img
-        x = x.reshape(-1,x.shape[-1])
+        full_x = patch_averages(x_as_img) if self.patch else x_as_img
+        full_x = full_x.reshape(-1,full_x.shape[-1])
+        if self.subsample != 1:
+            num_to_subsample = int(len(full_x) * self.subsample)
+            subsample_idxs = np.random.choice(len(full_x),size=num_to_subsample,replace=False)
+            x = full_x[subsample_idxs]
+        else:
+            x = full_x
         assert x.ndim == 2
         N,nz = x.shape
         if nz > 50:
@@ -112,8 +119,8 @@ class ComplexityMeasurer():
             x = dim_reducer.fit_transform(x).squeeze()
         N,nz = x.shape
         data_range_by_axis = x.max(axis=0) - x.min(axis=0)
-        len_of_each_cluster = (nz+1)/2 * (np.log2(data_range_by_axis).sum() + 32) # Float precision
-        len_of_outlier = np.log2(data_range_by_axis).sum() # Omit the 32 here because implicitly omitted in the model log_prob computation
+        self.len_of_each_cluster = (nz+1)/2 * (np.log2(data_range_by_axis).sum() + 32) # Float precision
+        self.len_of_outlier = np.log2(data_range_by_axis).sum() # Omit the 32 here because implicitly omitted in the model log_prob computation
         best_dl = np.inf
         best_nc = -1
         neg_dls_by_dpoint = []
@@ -121,33 +128,26 @@ class ComplexityMeasurer():
         all_rs = []
         all_ts = []
         for nc in range(1,self.ncs_to_check+1):
-            self.model = GMM(nc,n_init=self.n_cluster_inits)
-            self.cluster_labels = self.model.fit_predict(x)
-            if len(np.unique(self.cluster_labels)) == nc-1:
+            found_nc = self.cluster(x,nc)
+            if found_nc == nc-1:
                 print(f"only found {nc-1} clusters when looking for {nc}, terminating here"); break
-            if nc > 1 and self.display_cluster_imgs:
-                scatter_clusters(x,self.best_cluster_labels,show=True)
-            model_len = nc*(len_of_each_cluster)
-            idxs_len_per_cluster = np.log2(N) - np.log2(np.bincount(self.cluster_labels))
-            idxs_len_per_dpoint = idxs_len_per_cluster[self.cluster_labels]
-            new_model_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
-            neg_log_probs = new_model_scores * np.log2(np.e)
-            outliers = neg_log_probs > len_of_outlier
-            residual_errors = neg_log_probs * ~outliers
-            len_outliers = len_of_outlier * outliers
-            dl_by_dpoint = residual_errors + len_outliers + idxs_len_per_dpoint + model_len/N
             if self.verbose:
-                print(( f'{nc} {dl_by_dpoint.sum():.3f}\tMod: {model_len:.3f}\t'
-                        f'Err: {residual_errors.sum():.3f}\t'
-                        f'Idxs: {idxs_len_per_dpoint.sum():.3f}\t'
-                        f'O: {outliers.sum()} {len_outliers.sum():.3f}'))
-            all_rs.append(residual_errors)
-            all_ts.append(dl_by_dpoint)
-            idxs_lens.append(idxs_len_per_dpoint)
-            neg_dls_by_dpoint.append(-dl_by_dpoint)
-            if dl_by_dpoint.sum() < best_dl:
-                best_dl = dl_by_dpoint.sum()
-                self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
+                print(( f'{nc} {self.dl_by_dpoint.sum():.3f}\tMod: {self.model_len:.3f}\t'
+                        f'Err: {self.residuals.sum():.3f}\t'
+                        f'Idxs: {self.idxs_len_per_dpoint.sum():.3f}\t'
+                        f'O: {self.outliers.sum()} {self.len_outliers.sum():.3f}'))
+            all_rs.append(self.residuals)
+            all_ts.append(self.dl_by_dpoint)
+            idxs_lens.append(self.idxs_len_per_dpoint)
+            neg_dls_by_dpoint.append(-self.dl_by_dpoint)
+            if self.dl_by_dpoint.sum() < best_dl:
+                best_dl = self.dl_by_dpoint.sum()
+                best_nc = nc
+        if self.subsample != 1: self.cluster(full_x,best_nc)
+        self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
+        if self.subsample != 1:
+            weighted = self.idxs_len_per_dpoint.sum()
+            return best_nc, best_dl, weighted
         idxs_lens_array = np.stack(idxs_lens,axis=1)
         log_likelihood_per_dpoint = np.stack(neg_dls_by_dpoint,axis=1)
         if self.is_choose_model_per_dpoint:
@@ -161,6 +161,23 @@ class ComplexityMeasurer():
             print(f"weighted for layer {self.layer_being_processed}: {weighted:.2f}")
         return best_nc, best_dl, weighted
 
+    def cluster(self,x,nc):
+        N = len(x)
+        self.model = GMM(nc,n_init=self.n_cluster_inits)
+        self.cluster_labels = self.model.fit_predict(x)
+        found_nc = len(np.unique(self.cluster_labels))
+        if nc > 1 and self.display_cluster_imgs:
+            scatter_clusters(x,self.best_cluster_labels,show=True)
+        self.model_len = nc*(self.len_of_each_cluster)
+        self.idxs_len_per_cluster = np.log2(N) - np.log2(np.bincount(self.cluster_labels))
+        self.idxs_len_per_dpoint = self.idxs_len_per_cluster[self.cluster_labels]
+        new_model_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
+        neg_log_probs = new_model_scores * np.log2(np.e)
+        self.outliers = neg_log_probs > self.len_of_outlier
+        self.residuals = neg_log_probs * ~self.outliers
+        self.len_outliers = self.len_of_outlier * self.outliers
+        self.dl_by_dpoint = self.residuals + self.len_outliers + self.idxs_len_per_dpoint + self.model_len/N
+        return found_nc
     def viz_cluster_labels(self,size):
         nc = len(np.unique(self.best_cluster_labels))
         pallete = PALETTE[:nc]
