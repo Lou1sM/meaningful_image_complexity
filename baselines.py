@@ -72,3 +72,11 @@ def machado2015(im):
 
 def khan2021(im):
     return np.median(abs(np.fft.fft2((255*im).astype(np.uint8))))
+
+def redies2012(im):
+    sob = ndimage.sobel(im)
+    return jpg_compression_ratio(sob)
+
+if __name__ == "__main__":
+    im = np.random.rand(224,224,3)
+    redies2012(im)

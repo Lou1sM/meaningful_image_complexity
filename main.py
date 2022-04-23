@@ -11,7 +11,7 @@ from create_simple_imgs import create_simple_img
 import matplotlib.pyplot as plt
 from dl_utils.tensor_funcs import numpyify
 from dl_utils.misc import check_dir
-from baselines import rgb2gray, compute_fractal_dimension, glcm_entropy, machado2015, jpg_compression_ratio, khan2021
+from baselines import rgb2gray, compute_fractal_dimension, glcm_entropy, machado2015, jpg_compression_ratio, khan2021, redies2012
 from skimage.measure import shannon_entropy
 
 
@@ -27,6 +27,7 @@ parser.add_argument('--verbose','-v',action='store_true')
 parser.add_argument('--centroidify',action='store_true')
 parser.add_argument('--use_conv',action='store_true')
 parser.add_argument('--concat_patches',action='store_true')
+parser.add_argument('--show_df',action='store_true')
 parser.add_argument('--is_choose_model_per_dpoint',action='store_true')
 parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand','dtd','stripes','halves'],default='stripes')
 parser.add_argument('--num_ims',type=int,default=1)
@@ -51,7 +52,7 @@ comp_meas = ComplexityMeasurer(resnet=net,**comp_meas_kwargs)
 mean=[0.485, 0.456, 0.406]
 std=[0.229, 0.224, 0.225]
 weighted_by_class = {}
-methods = ['mdl','gclm','fract','ent','ass','jpg','mach','khan']
+methods = ['mdl','gclm','fract','ent','ass','jpg','mach','khan','redies']
 results_dict = {m:{} for m in methods}
 
 def append_or_add_key(d,key,val):
@@ -107,6 +108,7 @@ for i in range(ARGS.num_ims):
     jpg = jpg_compression_ratio(im)
     mach = machado2015(im)
     khan = khan2021(im)
+    redies = redies2012(im)
     bayes_mdl = sum(bayes_mdls)
     append_or_add_key(results_dict['mdl'],label,bayes_mdl)
     append_or_add_key(results_dict['ass'],label,assembly_idx)
@@ -116,6 +118,7 @@ for i in range(ARGS.num_ims):
     append_or_add_key(results_dict['jpg'],label,jpg)
     append_or_add_key(results_dict['mach'],label,mach)
     append_or_add_key(results_dict['khan'],label,khan)
+    append_or_add_key(results_dict['redies'],label,redies)
 
 def build_innerxy_df(class_results_dict):
     dict_of_dicts = {}
@@ -133,7 +136,8 @@ results_by_method = [pd.DataFrame(build_innerxy_df(d)).T for d in results_dict.v
 mi_df_for_this_dset = pd.concat(results_by_method,axis=0,keys=results_dict.keys())
 check_dir('experiments')
 mi_df_for_this_dset.to_csv(f'experiments/{ARGS.dset}_results.csv')
-#print(mi_df_for_this_dset)
+if ARGS.show_df:
+    print(mi_df_for_this_dset)
 mean_weighted = np.array(all_weighteds).mean(axis=0)
 print(*[f'{m:.3f}' for m in mean_weighted])
 #for k,v in weighted_by_class.items():
