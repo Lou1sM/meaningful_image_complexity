@@ -127,7 +127,10 @@ class ComplexityMeasurer():
             len_outliers = len_of_outlier * outliers
             dl_by_dpoint = residual_errors + len_outliers + idxs_len_per_dpoint + model_len/N
             if self.verbose:
-                print(f'{nc} {dl_by_dpoint.sum()}\tMod: {model_len:.3f}\tErr: {residual_errors.sum():.3f}\tO: {outliers.sum()} {len_outliers.sum():.3f}')
+                print(( f'{nc} {dl_by_dpoint.sum():.3f}\tMod: {model_len:.3f}\t'
+                        f'Err: {residual_errors.sum():.3f}\t'
+                        f'Idxs: {idxs_len_per_dpoint.sum():.3f}\t'
+                        f'O: {outliers.sum()} {len_outliers.sum():.3f}'))
             all_rs.append(residual_errors)
             all_ts.append(dl_by_dpoint)
             idxs_lens.append(idxs_len_per_dpoint)
