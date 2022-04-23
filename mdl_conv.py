@@ -17,9 +17,11 @@ class ComplexityMeasurer():
     def __init__(self,verbose,ncs_to_check,resnet,n_cluster_inits,
                     display_cluster_imgs,patch,use_conv,
                     is_choose_model_per_dpoint,nz,alg_nz,centroidify,
-                    concat_patches,skip_layers,subsample,**kwargs):
+                    concat_patches,skip_layers,subsample,patch_comb_method,
+                    **kwargs):
 
         self.verbose = verbose
+        self.patch_comb_method = patch_comb_method
         self.subsample = subsample
         self.skip_layers = skip_layers
         self.n_cluster_inits = n_cluster_inits
@@ -75,7 +77,7 @@ class ComplexityMeasurer():
                 x = self.apply_conv_layer(x,layer_being_processed)
             elif self.concat_patches:
                 patch_size = 4*(2**layer_being_processed)
-                x = patch_concats(x,patch_size,comb_method='sum')
+                x = combine_patches(x,patch_size,comb_method=self.patch_comb_method)
                 print(patch_size,x.shape)
             else:
                 break
@@ -178,6 +180,7 @@ class ComplexityMeasurer():
         self.len_outliers = self.len_of_outlier * self.outliers
         self.dl_by_dpoint = self.residuals + self.len_outliers + self.idxs_len_per_dpoint + self.model_len/N
         return found_nc
+
     def viz_cluster_labels(self,size):
         nc = len(np.unique(self.best_cluster_labels))
         pallete = PALETTE[:nc]
@@ -213,12 +216,17 @@ def make_dummy_layer(ks,stride,padding):
 def viz_proc_im(x):
     plt.imshow(x.sum(axis=2)); plt.show()
 
-def patch_concats(a,ps,comb_method):
-    different_shifts = [a[:-ps,:-ps], a[:-ps,ps:], a[ps:,:-ps], a[ps:,ps:]]
+def combine_patches(a,ps,comb_method):
+    row_shifts = [a[i:i-ps] for i in range(ps)]
     if comb_method == 'concat':
-        return np.concatenate(different_shifts,axis=2)
+        row_combined = np.concatenate(row_shifts,axis=2)
     elif comb_method == 'sum':
-        return sum(different_shifts)
+        row_combined = sum(row_shifts)
+    column_row_shifts = [row_combined[i:i-ps] for i in range(ps)]
+    if comb_method == 'concat':
+        return np.concatenate(column_row_shifts,axis=2)
+    elif comb_method == 'sum':
+        return sum(column_row_shifts)
 
 def patch_averages(a):
     try:
