@@ -14,10 +14,13 @@ from umap import UMAP
 
 PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
-    def __init__(self,verbose,ncs_to_check,resnet,n_cluster_inits,display_cluster_imgs,
-                 patch,use_conv,is_choose_model_per_dpoint,nz,alg_nz,centroidify,concat_patches,**kwargs):
+    def __init__(self,verbose,ncs_to_check,resnet,n_cluster_inits,
+                    display_cluster_imgs,patch,use_conv,
+                    is_choose_model_per_dpoint,nz,alg_nz,centroidify,
+                    concat_patches,skip_layers,**kwargs):
 
         self.verbose = verbose
+        self.skip_layers = skip_layers
         self.n_cluster_inits = n_cluster_inits
         self.display_cluster_imgs = display_cluster_imgs
         self.patch = patch
@@ -53,18 +56,25 @@ class ComplexityMeasurer():
             self.layer_being_processed = layer_being_processed
             if self.verbose:
                 print(f'applying cl to make im size {x.shape}')
-            num_clusters_at_this_level, dl, weighted = self.mdl_cluster(x)
+            if layer_being_processed in self.skip_layers:
+                num_clusters_at_this_level, dl, weighted = 0,0,0
+            else:
+                num_clusters_at_this_level, dl, weighted = self.mdl_cluster(x)
             total_num_clusters += num_clusters_at_this_level
             total_weighted += weighted
             if self.centroidify:
                 full_im_size_means = [x[self.best_cluster_labels==c].mean(axis=0)
                                     for c in np.unique(self.best_cluster_labels)]
                 x = np.array(full_im_size_means)[self.best_cluster_labels]
+            bool_ims_by_c = [(self.best_cluster_labels==c).astype(float)
+                            for c in np.unique(self.best_cluster_labels)]
+            one_hot_im = np.stack(bool_ims_by_c,axis=2)
+            x = one_hot_im
             if self.use_conv:
                 x = self.apply_conv_layer(x,layer_being_processed)
             elif self.concat_patches:
-                patch_size = 2**layer_being_processed
-                x = patch_concats(x,patch_size)
+                patch_size = 4*(2**layer_being_processed)
+                x = patch_concats(x,patch_size,comb_method='sum')
                 print(patch_size,x.shape)
             else:
                 break
@@ -137,7 +147,7 @@ class ComplexityMeasurer():
             neg_dls_by_dpoint.append(-dl_by_dpoint)
             if dl_by_dpoint.sum() < best_dl:
                 best_dl = dl_by_dpoint.sum()
-                self.best_cluster_labels = self.cluster_labels
+                self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
         idxs_lens_array = np.stack(idxs_lens,axis=1)
         log_likelihood_per_dpoint = np.stack(neg_dls_by_dpoint,axis=1)
         if self.is_choose_model_per_dpoint:
@@ -186,10 +196,12 @@ def make_dummy_layer(ks,stride,padding):
 def viz_proc_im(x):
     plt.imshow(x.sum(axis=2)); plt.show()
 
-def patch_concats(a,ps):
+def patch_concats(a,ps,comb_method):
     different_shifts = [a[:-ps,:-ps], a[:-ps,ps:], a[ps:,:-ps], a[ps:,ps:]]
-    concatted = np.concatenate(different_shifts,axis=2)
-    return concatted
+    if comb_method == 'concat':
+        return np.concatenate(different_shifts,axis=2)
+    elif comb_method == 'sum':
+        return sum(different_shifts)
 
 def patch_averages(a):
     try:
