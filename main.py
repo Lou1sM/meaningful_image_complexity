@@ -10,6 +10,7 @@ from load_non_torch_dsets import load_rand
 from create_simple_imgs import create_simple_img
 import matplotlib.pyplot as plt
 from dl_utils.tensor_funcs import numpyify
+from dl_utils.misc import check_dir
 from baselines import rgb2gray, compute_fractal_dimension, glcm_entropy, machado2015, jpg_compression_ratio, khan2021
 from skimage.measure import shannon_entropy
 
@@ -33,9 +34,9 @@ parser.add_argument('--alg_nz',type=str,choices=['pca','umap','tsne'],default='p
 ARGS = parser.parse_args()
 
 if ARGS.dset == 'cifar':
-    dset = torchvision.datasets.CIFAR10(root='/home/louis/datasets',download=True,train=True)
+    dset = torchvision.datasets.CIFAR10(root='~/datasets',download=True,train=True)
 elif ARGS.dset == 'mnist':
-    dset = torchvision.datasets.MNIST(root='/home/louis/datasets',train=False,download=True)
+    dset = torchvision.datasets.MNIST(root='~/datasets',train=False,download=True)
 elif ARGS.dset == 'rand':
     dset = np.random.rand(ARGS.num_ims,224,224,3)
 all_assembly_idxs = []
@@ -126,6 +127,7 @@ mean_var_results = {method_k:{class_k:{'mean':np.array(v).mean(),'var':np.array(
                     for method_k,method_v in results_dict.items()}
 results_by_method = [pd.DataFrame(build_innerxy_df(d)).T for d in results_dict.values()]
 mi_df_for_this_dset = pd.concat(results_by_method,axis=0,keys=results_dict.keys())
+check_dir('experiments')
 mi_df_for_this_dset.to_csv(f'experiments/{ARGS.dset}_results.csv')
 #print(mi_df_for_this_dset)
 mean_weighted = np.array(all_weighteds).mean()

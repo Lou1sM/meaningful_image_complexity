@@ -161,10 +161,10 @@ class ComplexityMeasurer():
     def apply_conv_layer(self,x,layer_num='none',custom_cnvl='none'):
         assert (layer_num == 'none') ^ (custom_cnvl == 'none')
         try:
-            torch_x = torch.tensor(x).transpose(0,2).float()
+            torch_x = torch.tensor(x).transpose(0,2).float().cuda()
             if torch_x.ndim == 3:
                 torch_x = torch_x.unsqueeze(0)
-            layer_to_apply = self.layers[layer_num] if custom_cnvl == 'none' else custom_cnvl
+            layer_to_apply = self.layers[layer_num].cuda() if custom_cnvl == 'none' else custom_cnvl
             torch_x = layer_to_apply(torch_x)
             return numpyify(torch_x.squeeze(0).transpose(0,2))
         except Exception as e:
