@@ -20,11 +20,12 @@ parser.add_argument('--no_resize',action='store_true')
 parser.add_argument('--display_cluster_imgs',action='store_true')
 parser.add_argument('--patch',action='store_true')
 parser.add_argument('--no_pretrained',action='store_true')
-parser.add_argument('--patch_comb_method',type=str,choices=['sum','concat'],default='sum')
+parser.add_argument('--patch_comb_method',type=str,choices=['sum','concat','and'],default='sum')
 parser.add_argument('--skip_layers',type=int,nargs='+',default=[])
 parser.add_argument('--subsample',type=float,default=1)
 parser.add_argument('--verbose','-v',action='store_true')
 parser.add_argument('--centroidify',action='store_true')
+parser.add_argument('--cluster_idxify',action='store_true')
 parser.add_argument('--use_conv',action='store_true')
 parser.add_argument('--concat_patches',action='store_true')
 parser.add_argument('--show_df',action='store_true')
@@ -43,16 +44,15 @@ elif ARGS.dset == 'mnist':
     dset = torchvision.datasets.MNIST(root='~/datasets',train=False,download=True)
 elif ARGS.dset == 'rand':
     dset = np.random.rand(ARGS.num_ims,224,224,3)
-all_assembly_idxs = []
-all_levels = []
-all_weighteds = []
+all_c_idx_infos = []
+all_patch_entropys = []
 net = models.resnet18(pretrained=not ARGS.no_pretrained)
 comp_meas_kwargs = ARGS.__dict__
 comp_meas = ComplexityMeasurer(resnet=net,**comp_meas_kwargs)
 mean=[0.485, 0.456, 0.406]
 std=[0.229, 0.224, 0.225]
 weighted_by_class = {}
-methods = ['mdl','gclm','fract','ent','ass','jpg','mach','khan','redies']
+methods = ['mdl','gclm','fract','ent','ncs','jpg','mach','khan','redies','patch_ent']
 results_dict = {m:{} for m in methods}
 
 def append_or_add_key(d,key,val):
@@ -101,17 +101,18 @@ for i in range(ARGS.num_ims):
     im_unint8 = (greyscale_im*255).astype(np.uint8)
     gclm_ent = glcm_entropy(im_unint8)
     ent = shannon_entropy(im_unint8)
-    assembly_idx,level,bayes_mdls = comp_meas.interpret(im_normed)
-    all_assembly_idxs.append(assembly_idx)
-    all_levels.append(level)
-    all_weighteds.append(bayes_mdls)
+    new_patch_entropys, ncs, new_c_idx_infos = comp_meas.interpret(im_normed)
+    all_c_idx_infos.append(new_c_idx_infos)
+    all_patch_entropys.append(new_patch_entropys)
     jpg = jpg_compression_ratio(im)
     mach = machado2015(im)
     khan = khan2021(im)
     redies = redies2012(im)
-    bayes_mdl = sum(bayes_mdls)
-    append_or_add_key(results_dict['mdl'],label,bayes_mdl)
-    append_or_add_key(results_dict['ass'],label,assembly_idx)
+    c_idx_info = sum(new_c_idx_infos)
+    patch_entropy = sum(new_patch_entropys)
+    append_or_add_key(results_dict['patch_ent'],label,patch_entropy)
+    append_or_add_key(results_dict['mdl'],label,c_idx_info)
+    append_or_add_key(results_dict['ncs'],label,ncs)
     append_or_add_key(results_dict['gclm'],label,gclm_ent)
     append_or_add_key(results_dict['fract'],label,fractal_dim)
     append_or_add_key(results_dict['ent'],label,ent)
@@ -138,8 +139,7 @@ check_dir('experiments')
 mi_df_for_this_dset.to_csv(f'experiments/{ARGS.dset}_results.csv')
 if ARGS.show_df:
     print(mi_df_for_this_dset)
-mean_weighted = np.array(all_weighteds).mean(axis=0)
+mean_weighted = np.array(all_c_idx_infos).mean(axis=0)
+mean_patch_entropys = np.array(all_patch_entropys).mean(axis=0)
 print(*[f'{m:.3f}' for m in mean_weighted])
-#for k,v in weighted_by_class.items():
-    #print(f'{k}: {np.array(v).mean():.2f}')
-#print(f'\nMean across all classes: {mean_weighted:.3f}')
+print(*[f'{pe:.3f}' for pe in mean_patch_entropys])
