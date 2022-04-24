@@ -1,4 +1,5 @@
 import argparse
+from time import time
 import json
 import pandas as pd
 from PIL import Image
@@ -59,7 +60,9 @@ def append_or_add_key(d,key,val):
         d[key] = [val]
 
 line_thicknesses = np.random.permutation(np.arange(3,10))
+img_start_times = []
 for i in range(ARGS.num_ims):
+    img_start_times.append(time())
     if ARGS.dset == 'im':
         im, label = load_rand('imagenette',~ARGS.no_resize)
         im = im/255
@@ -67,7 +70,7 @@ for i in range(ARGS.num_ims):
             im = np.resize(im,(*(im.shape),1))
     elif ARGS.dset == 'dtd':
         im, label = load_rand('dtd',~ARGS.no_resize)
-        im /= 255
+        im = im/255
     elif ARGS.dset == 'stripes':
         slope = np.random.rand()+.5
         line_thickness = line_thicknesses[i%len(line_thicknesses)]
@@ -81,16 +84,16 @@ for i in range(ARGS.num_ims):
         im = dset[i]
         label = 'none'
     else:
+        idx = np.random.randint(len(dset)) if ARGS.rand_dpoint else i
+        print(idx)
         if ARGS.dset == 'cifar':
-            idx = np.random.randint(len(dset)) if ARGS.rand_dpoint else i
-            print(idx)
             im = dset.data[idx]
             im = np.array(Image.fromarray(im).resize((224,224)))/255
         elif ARGS.dset == 'mnist':
-            im = numpyify(dset.data[i])
+            im = numpyify(dset.data[idx])
             im = np.array(Image.fromarray(im).resize((224,224)))
             im = np.tile(np.expand_dims(im,2),(1,1,3))
-        label = int(dset.targets[i])
+        label = int(dset.targets[idx])
     if ARGS.display_cluster_imgs:
         plt.imshow(im);plt.show()
     #im_normed = (im-mean)/std
@@ -120,6 +123,9 @@ for i in range(ARGS.num_ims):
     append_or_add_key(results_dict['khan'],label,khan)
     append_or_add_key(results_dict['redies'],label,redies)
 
+img_times = [img_start_times[i+1] - imgs for i,imgs in enumerate(img_start_times[:-1])]
+tot_c_time = f' tot: {(img_start_times[-1] - img_start_times[0])/ARGS.num_ims:.2f}'
+print(' '.join([f'{i}: {s:.2f}' for i,s in enumerate(img_times)]) + tot_c_time)
 def build_innerxy_df(class_results_dict):
     dict_of_dicts = {}
     for k,v in class_results_dict.items():

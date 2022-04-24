@@ -37,6 +37,7 @@ class ComplexityMeasurer():
         self.info_subsample = info_subsample
 
     def interpret(self,given_x):
+        img_start_time = time()
         x = np.copy(given_x)
         total_num_clusters = 0
         all_weighteds = []
@@ -46,7 +47,7 @@ class ComplexityMeasurer():
             self.layer_being_processed = layer_being_processed
             cluster_start_time = time()
             num_clusters_at_this_level, dl, weighted = self.mdl_cluster(x)
-            #print(f'mdl_cluster time: {time()-cluster_start_time:.2f}')
+            print(f'mdl_cluster time: {time()-cluster_start_time:.2f}')
             total_num_clusters += num_clusters_at_this_level
             all_weighteds.append(weighted)
             bool_ims_by_c = [(self.best_cluster_labels==c)
@@ -63,9 +64,10 @@ class ComplexityMeasurer():
             #true_entropy = info_in_patches(c_idx_patches,1)
             #print(f'true entropy: {true_entropy}, '
                     #f'approx at {self.info_subsample}: {patch_entropy}')
-            #print(f'time to compute entropy: {time()-info_start_time:.2f}')
+            print(f'time to compute entropy: {time()-info_start_time:.2f}')
             all_patch_entropys.append(patch_entropy)
             print(f'{layer_being_processed}: weighted: {weighted}, patch_ent: {patch_entropy}')
+        print(f'image time: {time()-img_start_time:.2f}')
         return all_patch_entropys, total_num_clusters, all_weighteds
 
     def get_smallest_increment(self,x):
@@ -103,7 +105,9 @@ class ComplexityMeasurer():
                 dim_reducer = UMAP(n_components=self.nz,min_dist=0,n_neighbors=50)
             elif self.alg_nz == 'tsne':
                 dim_reducer = TSNE(n_components=self.nz, learning_rate='auto',init='pca')
+            dim_red_start_time = time()
             x = dim_reducer.fit_transform(x).squeeze()
+            print(f'dim red time: {time()-dim_red_start_time:.2f}')
         N,nz = x.shape
         data_range_by_axis = x.max(axis=0) - x.min(axis=0)
         self.len_of_each_cluster = (nz+1)/2 * (np.log2(data_range_by_axis).sum() + 32) # Float precision
@@ -114,7 +118,9 @@ class ComplexityMeasurer():
         idxs_lens = []
         all_rs = []
         all_ts = []
+        nc_start_times = []
         for nc in range(1,self.ncs_to_check+1):
+            nc_start_times.append(time())
             found_nc = self.cluster(x,nc)
             if found_nc == nc-1:
                 print(f"only found {nc-1} clusters when looking for {nc}, terminating here"); break
@@ -130,8 +136,11 @@ class ComplexityMeasurer():
             if self.dl_by_dpoint.sum() < best_dl:
                 best_dl = self.dl_by_dpoint.sum()
                 best_nc = nc
-        if self.subsample != 1: self.cluster(full_x,best_nc)
+        self.cluster(full_x,best_nc)
         self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
+        nc_times = [nc_start_times[i+1] - ncs for i,ncs in enumerate(nc_start_times[:-1])]
+        tot_c_time = f' tot: {nc_start_times[-1] - nc_start_times[0]:.2f}'
+        print(' '.join([f'{i}: {s:.2f}' for i,s in enumerate(nc_times)]) + tot_c_time)
         if self.subsample != 1:
             weighted = self.idxs_len_per_dpoint.sum()
             return best_nc, best_dl, weighted
@@ -147,7 +156,7 @@ class ComplexityMeasurer():
 
     def cluster(self,x,nc):
         N = len(x)
-        self.model = GMM(nc,n_init=self.n_cluster_inits)
+        self.model = GMM(nc,n_init=self.n_cluster_inits,covariance_type='diag')
         self.cluster_labels = self.model.fit_predict(x)
         found_nc = len(np.unique(self.cluster_labels))
         if nc > 1 and self.display_cluster_imgs:
