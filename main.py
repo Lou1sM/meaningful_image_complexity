@@ -18,16 +18,14 @@ from skimage.measure import shannon_entropy
 parser = argparse.ArgumentParser()
 parser.add_argument('--no_resize',action='store_true')
 parser.add_argument('--display_cluster_imgs',action='store_true')
-parser.add_argument('--patch',action='store_true')
-parser.add_argument('--no_pretrained',action='store_true')
-parser.add_argument('--patch_comb_method',type=str,choices=['sum','concat','and'],default='sum')
+parser.add_argument('--rand_dpoint',action='store_true')
+parser.add_argument('--patch_comb_method',type=str,choices=['sum','concat','or'],default='sum')
 parser.add_argument('--skip_layers',type=int,nargs='+',default=[])
 parser.add_argument('--subsample',type=float,default=1)
+parser.add_argument('--info_subsample',type=float,default=1)
 parser.add_argument('--verbose','-v',action='store_true')
 parser.add_argument('--centroidify',action='store_true')
 parser.add_argument('--cluster_idxify',action='store_true')
-parser.add_argument('--use_conv',action='store_true')
-parser.add_argument('--concat_patches',action='store_true')
 parser.add_argument('--show_df',action='store_true')
 parser.add_argument('--is_choose_model_per_dpoint',action='store_true')
 parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand','dtd','stripes','halves'],default='stripes')
@@ -46,9 +44,8 @@ elif ARGS.dset == 'rand':
     dset = np.random.rand(ARGS.num_ims,224,224,3)
 all_c_idx_infos = []
 all_patch_entropys = []
-net = models.resnet18(pretrained=not ARGS.no_pretrained)
 comp_meas_kwargs = ARGS.__dict__
-comp_meas = ComplexityMeasurer(resnet=net,**comp_meas_kwargs)
+comp_meas = ComplexityMeasurer(**comp_meas_kwargs)
 mean=[0.485, 0.456, 0.406]
 std=[0.229, 0.224, 0.225]
 weighted_by_class = {}
@@ -85,7 +82,9 @@ for i in range(ARGS.num_ims):
         label = 'none'
     else:
         if ARGS.dset == 'cifar':
-            im = dset.data[i]
+            idx = np.random.randint(len(dset)) if ARGS.rand_dpoint else i
+            print(idx)
+            im = dset.data[idx]
             im = np.array(Image.fromarray(im).resize((224,224)))/255
         elif ARGS.dset == 'mnist':
             im = numpyify(dset.data[i])

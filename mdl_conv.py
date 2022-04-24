@@ -1,4 +1,5 @@
 from scipy.special import softmax
+from time import time
 from scipy.stats import entropy
 from matplotlib.colors import BASE_COLORS
 from dl_utils.misc import scatter_clusters
@@ -15,11 +16,11 @@ from umap import UMAP
 
 PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
-    def __init__(self,verbose,ncs_to_check,resnet,n_cluster_inits,
-                    display_cluster_imgs,patch,use_conv,
+    def __init__(self,verbose,ncs_to_check,n_cluster_inits,
+                    display_cluster_imgs,
                     is_choose_model_per_dpoint,nz,alg_nz,centroidify,
-                    concat_patches,skip_layers,subsample,patch_comb_method,
-                    cluster_idxify,**kwargs):
+                    skip_layers,subsample,patch_comb_method,
+                    cluster_idxify,info_subsample,**kwargs):
 
         self.verbose = verbose
         self.cluster_idxify = cluster_idxify
@@ -28,27 +29,12 @@ class ComplexityMeasurer():
         self.skip_layers = skip_layers
         self.n_cluster_inits = n_cluster_inits
         self.display_cluster_imgs = display_cluster_imgs
-        self.patch = patch
-        self.use_conv = use_conv
-        self.concat_patches = concat_patches
         self.is_choose_model_per_dpoint = is_choose_model_per_dpoint
         self.ncs_to_check = ncs_to_check
         self.nz = nz
         self.alg_nz = alg_nz
         self.centroidify = centroidify
-
-        self.layer1 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu,resnet.maxpool)
-        self.layer2 = resnet.layer1
-        self.layer3 = resnet.layer2
-        self.layer4 = resnet.layer3
-        self.layer5 = resnet.layer4
-        self.layers = (self.layer1,self.layer2,self.layer3,self.layer4,self.layer5)
-        for layer in self.layers:
-            for m in layer.modules():
-                if hasattr(m,'padding_mode'):
-                    m.padding_mode = 'replicate'
-        self.dummy_initial_layer = nn.Sequential(make_dummy_layer(7,2,3),nn.MaxPool2d(3,2,1,dilation=1,ceil_mode=False))
-        self.dummy_downsample_rlayer = make_dummy_layer(3,2,1)
+        self.info_subsample = info_subsample
 
     def interpret(self,given_x):
         x = np.copy(given_x)
@@ -57,35 +43,27 @@ class ComplexityMeasurer():
         all_patch_entropys = []
         self.get_smallest_increment(x)
         for layer_being_processed in range(4):
-            if (x.shape[0]-1)*(x.shape[1]-1) < 50:
-                break
             self.layer_being_processed = layer_being_processed
-            if self.verbose:
-                print(f'applying cl to make im size {x.shape}')
-            if layer_being_processed in self.skip_layers:
-                num_clusters_at_this_level, dl, weighted = 0,0,0
-            else:
-                num_clusters_at_this_level, dl, weighted = self.mdl_cluster(x)
+            cluster_start_time = time()
+            num_clusters_at_this_level, dl, weighted = self.mdl_cluster(x)
+            #print(f'mdl_cluster time: {time()-cluster_start_time:.2f}')
             total_num_clusters += num_clusters_at_this_level
             all_weighteds.append(weighted)
-            if self.centroidify:
-                full_im_size_means = [x[self.best_cluster_labels==c].mean(axis=0)
-                                    for c in np.unique(self.best_cluster_labels)]
-                x = np.array(full_im_size_means)[self.best_cluster_labels]
             bool_ims_by_c = [(self.best_cluster_labels==c)
                             for c in np.unique(self.best_cluster_labels)]
             one_hot_im = np.stack(bool_ims_by_c,axis=2)
+            patch_size = 4*(2**layer_being_processed)
+            c_idx_patches = combine_patches(one_hot_im,patch_size,self.patch_comb_method)
             if self.cluster_idxify:
-                x = one_hot_im
-            #if self.use_conv:
-                #x = self.apply_conv_layer(x,layer_being_processed)
-            if self.patch_comb_method != 'none':
-                patch_size = 4*(2**layer_being_processed)
-                x = combine_patches(x,patch_size,comb_method=self.patch_comb_method)
+                x = c_idx_patches
             else:
-                break
-            import pdb; pdb.set_trace()  # XXX BREAKPOINT
-            patch_entropy = info_in_patches(x)
+                x = combine_patches(x,patch_size,self.patch_comb_method)
+            info_start_time = time()
+            patch_entropy = info_in_patches(c_idx_patches,self.info_subsample)
+            #true_entropy = info_in_patches(c_idx_patches,1)
+            #print(f'true entropy: {true_entropy}, '
+                    #f'approx at {self.info_subsample}: {patch_entropy}')
+            #print(f'time to compute entropy: {time()-info_start_time:.2f}')
             all_patch_entropys.append(patch_entropy)
             print(f'{layer_being_processed}: weighted: {weighted}, patch_ent: {patch_entropy}')
         return all_patch_entropys, total_num_clusters, all_weighteds
@@ -106,7 +84,7 @@ class ComplexityMeasurer():
         return proj_clusters_as_img.flatten().round().astype(int)
 
     def mdl_cluster(self,x_as_img):
-        full_x = patch_averages(x_as_img) if self.patch else x_as_img
+        full_x = x_as_img
         full_x = full_x.reshape(-1,full_x.shape[-1])
         if self.subsample != 1:
             num_to_subsample = int(len(full_x) * self.subsample)
@@ -205,11 +183,18 @@ class ComplexityMeasurer():
             print(e)
             breakpoint()
 
-def info_in_patches(patched_im):
+def info_in_patches(patched_im,subsample):
     assert patched_im.ndim == 3
     nc = patched_im.shape[2]
-    y = list(set([tuple(z) for z in patched_im.reshape(-1,nc)]))
-    bin_counts = np.bincount([y.index(tuple(z)) for z in patched_im.reshape(-1,nc)])
+    flattened = patched_im.reshape(-1,nc)
+    if subsample == 1:
+        to_use = flattened
+    else:
+        num_to_subsample = int(len(flattened) * subsample)
+        subsample_idxs = np.random.choice(len(flattened),size=num_to_subsample,replace=False)
+        to_use = flattened[subsample_idxs]
+    y = list(set([tuple(z) for z in to_use]))
+    bin_counts = np.bincount([y.index(tuple(z)) for z in to_use])
     return entropy(bin_counts,base=2)
 
 
@@ -233,18 +218,12 @@ def combine_patches(a,ps,comb_method):
         comb_func = lambda x: np.concatenate(x.astype(float),axis=2)
     elif comb_method == 'sum':
         comb_func = lambda x: sum([z.astype(float) for z in x])
-    elif comb_method == 'and':
+    elif comb_method == 'or':
         comb_func = lambda x: recursive_np_or(x).astype(float)
     row_shifts = [a[i:i-ps] for i in range(ps)]
     row_combined = comb_func(row_shifts)
     column_row_shifts = [row_combined[:,i:i-ps] for i in range(ps)]
     return comb_func(column_row_shifts)
-    #elif comb_method == 'sum':
-    #    row_combined = sum(row_shifts)
-    #if comb_method == 'concat':
-    #    return np.concatenate(column_row_shifts,axis=2)
-    #elif comb_method == 'sum':
-    #    return sum(column_row_shifts)
 
 def patch_averages(a):
     try:
