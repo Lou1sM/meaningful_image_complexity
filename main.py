@@ -25,6 +25,7 @@ parser.add_argument('--skip_layers',type=int,nargs='+',default=[])
 parser.add_argument('--subsample',type=float,default=1)
 parser.add_argument('--info_subsample',type=float,default=1)
 parser.add_argument('--verbose','-v',action='store_true')
+parser.add_argument('--print_times',action='store_true')
 parser.add_argument('--centroidify',action='store_true')
 parser.add_argument('--cluster_idxify',action='store_true')
 parser.add_argument('--show_df',action='store_true')
@@ -124,8 +125,9 @@ for i in range(ARGS.num_ims):
     append_or_add_key(results_dict['redies'],label,redies)
 
 img_times = [img_start_times[i+1] - imgs for i,imgs in enumerate(img_start_times[:-1])]
-tot_c_time = f' tot: {(img_start_times[-1] - img_start_times[0])/ARGS.num_ims:.2f}'
-print(' '.join([f'{i}: {s:.2f}' for i,s in enumerate(img_times)]) + tot_c_time)
+tot_c_time = (img_start_times[-1] - img_start_times[0])/ARGS.num_ims
+#print(' '.join([f'{i}: {s:.1f}' for i,s in enumerate(img_times)]) + tot_c_time)
+print(f'Avg time per image: {tot_c_time}')
 def build_innerxy_df(class_results_dict):
     dict_of_dicts = {}
     for k,v in class_results_dict.items():

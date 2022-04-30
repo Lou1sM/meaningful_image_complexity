@@ -16,13 +16,14 @@ from umap import UMAP
 
 PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
-    def __init__(self,verbose,ncs_to_check,n_cluster_inits,
+    def __init__(self,verbose,ncs_to_check,n_cluster_inits,print_times,
                     display_cluster_imgs,
                     is_choose_model_per_dpoint,nz,alg_nz,centroidify,
                     skip_layers,subsample,patch_comb_method,
                     cluster_idxify,info_subsample,**kwargs):
 
         self.verbose = verbose
+        self.print_times = print_times
         self.cluster_idxify = cluster_idxify
         self.patch_comb_method = patch_comb_method
         self.subsample = subsample
@@ -40,16 +41,20 @@ class ComplexityMeasurer():
         img_start_time = time()
         x = np.copy(given_x)
         total_num_clusters = 0
-        all_weighteds = []
+        all_single_labels_entropys = []
         all_patch_entropys = []
         self.get_smallest_increment(x)
         for layer_being_processed in range(4):
             self.layer_being_processed = layer_being_processed
             cluster_start_time = time()
-            num_clusters_at_this_level, dl, weighted = self.mdl_cluster(x)
-            print(f'mdl_cluster time: {time()-cluster_start_time:.2f}')
+            num_clusters_at_this_level, dl, single_labels_entropy = self.mdl_cluster(x)
+            single_labels_entropy = labels_entropy(self.best_cluster_labels.flatten())
+            #bin_counts = np.bincount(self.best_cluster_labels.flatten())
+            #single_labels_entropy = entropy(bin_counts)
+            if self.print_times:
+                print(f'mdl_cluster time: {time()-cluster_start_time:.2f}')
             total_num_clusters += num_clusters_at_this_level
-            all_weighteds.append(weighted)
+            all_single_labels_entropys.append(single_labels_entropy)
             bool_ims_by_c = [(self.best_cluster_labels==c)
                             for c in np.unique(self.best_cluster_labels)]
             one_hot_im = np.stack(bool_ims_by_c,axis=2)
@@ -61,14 +66,17 @@ class ComplexityMeasurer():
                 x = combine_patches(x,patch_size,self.patch_comb_method)
             info_start_time = time()
             patch_entropy = info_in_patches(c_idx_patches,self.info_subsample)
-            #true_entropy = info_in_patches(c_idx_patches,1)
-            #print(f'true entropy: {true_entropy}, '
-                    #f'approx at {self.info_subsample}: {patch_entropy}')
-            print(f'time to compute entropy: {time()-info_start_time:.2f}')
+            if self.info_subsample != 1 and self.compare_to_true_entropy:
+                true_entropy = info_in_patches(c_idx_patches,1)
+                print(f'true entropy: {true_entropy}, '
+                        f'approx at {self.info_subsample}: {patch_entropy}')
+            if self.print_times:
+                print(f'time to compute entropy: {time()-info_start_time:.2f}')
             all_patch_entropys.append(patch_entropy)
             print(f'{layer_being_processed}: weighted: {weighted}, patch_ent: {patch_entropy}')
-        print(f'image time: {time()-img_start_time:.2f}')
-        return all_patch_entropys, total_num_clusters, all_weighteds
+        if self.print_times:
+            print(f'image time: {time()-img_start_time:.2f}')
+        return all_patch_entropys, total_num_clusters, all_single_labels_entropys
 
     def get_smallest_increment(self,x):
         sx = sorted(x.flatten())
@@ -107,7 +115,8 @@ class ComplexityMeasurer():
                 dim_reducer = TSNE(n_components=self.nz, learning_rate='auto',init='pca')
             dim_red_start_time = time()
             x = dim_reducer.fit_transform(x).squeeze()
-            print(f'dim red time: {time()-dim_red_start_time:.2f}')
+            if self.print_times:
+                print(f'dim red time: {time()-dim_red_start_time:.2f}')
         N,nz = x.shape
         data_range_by_axis = x.max(axis=0) - x.min(axis=0)
         self.len_of_each_cluster = (nz+1)/2 * (np.log2(data_range_by_axis).sum() + 32) # Float precision
@@ -129,30 +138,32 @@ class ComplexityMeasurer():
                         f'Err: {self.residuals.sum():.3f}\t'
                         f'Idxs: {self.idxs_len_per_dpoint.sum():.3f}\t'
                         f'O: {self.outliers.sum()} {self.len_outliers.sum():.3f}'))
-            all_rs.append(self.residuals)
-            all_ts.append(self.dl_by_dpoint)
-            idxs_lens.append(self.idxs_len_per_dpoint)
-            neg_dls_by_dpoint.append(-self.dl_by_dpoint)
+            #all_rs.append(self.residuals)
+            #all_ts.append(self.dl_by_dpoint)
+            #idxs_lens.append(self.idxs_len_per_dpoint)
+            #neg_dls_by_dpoint.append(-self.dl_by_dpoint)
             if self.dl_by_dpoint.sum() < best_dl:
                 best_dl = self.dl_by_dpoint.sum()
                 best_nc = nc
-        self.cluster(full_x,best_nc)
-        self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
-        nc_times = [nc_start_times[i+1] - ncs for i,ncs in enumerate(nc_start_times[:-1])]
-        tot_c_time = f' tot: {nc_start_times[-1] - nc_start_times[0]:.2f}'
-        print(' '.join([f'{i}: {s:.2f}' for i,s in enumerate(nc_times)]) + tot_c_time)
+                self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
+        if self.print_times:
+            nc_times = [nc_start_times[i+1] - ncs for i,ncs in enumerate(nc_start_times[:-1])]
+            tot_c_time = f' tot: {nc_start_times[-1] - nc_start_times[0]:.2f}'
+            print(' '.join([f'{i}: {s:.2f}' for i,s in enumerate(nc_times)]) + tot_c_time)
+        if self.subsample != 1:
+            self.cluster(full_x,best_nc)
+            self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
         if self.subsample != 1:
             weighted = self.idxs_len_per_dpoint.sum()
-            return best_nc, best_dl, weighted
-        idxs_lens_array = np.stack(idxs_lens,axis=1)
-        log_likelihood_per_dpoint = np.stack(neg_dls_by_dpoint,axis=1)
-        if self.is_choose_model_per_dpoint:
-            posterior_per_dpoint = softmax(log_likelihood_per_dpoint,axis=1)
-            weighted = (idxs_lens_array * posterior_per_dpoint).sum()
-        else:
-            posterior_for_dset = softmax(log_likelihood_per_dpoint.sum(axis=0))
-            weighted = np.dot(idxs_lens_array.sum(axis=0), posterior_for_dset)
-        return best_nc, best_dl, weighted
+        #idxs_lens_array = np.stack(idxs_lens,axis=1)
+        #log_likelihood_per_dpoint = np.stack(neg_dls_by_dpoint,axis=1)
+        #if self.is_choose_model_per_dpoint:
+            #posterior_per_dpoint = softmax(log_likelihood_per_dpoint,axis=1)
+            #weighted = (idxs_lens_array * posterior_per_dpoint).sum()
+        #else:
+            #posterior_for_dset = softmax(log_likelihood_per_dpoint.sum(axis=0))
+            #weighted = np.dot(idxs_lens_array.sum(axis=0), posterior_for_dset)
+        return best_nc, best_dl, single_labels_entropy
 
     def cluster(self,x,nc):
         N = len(x)
@@ -203,7 +214,15 @@ def info_in_patches(patched_im,subsample):
         subsample_idxs = np.random.choice(len(flattened),size=num_to_subsample,replace=False)
         to_use = flattened[subsample_idxs]
     y = list(set([tuple(z) for z in to_use]))
-    bin_counts = np.bincount([y.index(tuple(z)) for z in to_use])
+    tuples_as_idxs = [y.index(tuple(z)) for z in to_use]
+    return labels_entropy(tuples_as_idxs)
+    #bin_counts = np.bincount(
+    #return entropy(bin_counts,base=2)
+
+
+def labels_entropy(labels):
+    assert labels.ndim == 1
+    bin_counts = np.bincount(self.labels.flatten())
     return entropy(bin_counts,base=2)
 
 
