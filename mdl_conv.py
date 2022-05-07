@@ -17,7 +17,7 @@ from umap import UMAP
 PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
     def __init__(self,verbose,ncs_to_check,n_cluster_inits,print_times,
-                    display_cluster_imgs,
+                    display_cluster_imgs,compare_to_true_entropy,
                     is_choose_model_per_dpoint,nz,alg_nz,centroidify,
                     skip_layers,subsample,patch_comb_method,
                     cluster_idxify,info_subsample,**kwargs):
@@ -25,6 +25,7 @@ class ComplexityMeasurer():
         self.verbose = verbose
         self.print_times = print_times
         self.cluster_idxify = cluster_idxify
+        self.compare_to_true_entropy = compare_to_true_entropy
         self.patch_comb_method = patch_comb_method
         self.subsample = subsample
         self.skip_layers = skip_layers
@@ -47,7 +48,7 @@ class ComplexityMeasurer():
         for layer_being_processed in range(4):
             self.layer_being_processed = layer_being_processed
             cluster_start_time = time()
-            num_clusters_at_this_level, dl, single_labels_entropy = self.mdl_cluster(x)
+            num_clusters_at_this_level, dl = self.mdl_cluster(x)
             single_labels_entropy = labels_entropy(self.best_cluster_labels.flatten())
             #bin_counts = np.bincount(self.best_cluster_labels.flatten())
             #single_labels_entropy = entropy(bin_counts)
@@ -73,7 +74,7 @@ class ComplexityMeasurer():
             if self.print_times:
                 print(f'time to compute entropy: {time()-info_start_time:.2f}')
             all_patch_entropys.append(patch_entropy)
-            print(f'{layer_being_processed}: weighted: {weighted}, patch_ent: {patch_entropy}')
+            print(f'{layer_being_processed}: single ent: {single_labels_entropy}, patch_ent: {patch_entropy}')
         if self.print_times:
             print(f'image time: {time()-img_start_time:.2f}')
         return all_patch_entropys, total_num_clusters, all_single_labels_entropys
@@ -163,12 +164,17 @@ class ComplexityMeasurer():
         #else:
             #posterior_for_dset = softmax(log_likelihood_per_dpoint.sum(axis=0))
             #weighted = np.dot(idxs_lens_array.sum(axis=0), posterior_for_dset)
-        return best_nc, best_dl, single_labels_entropy
+        return best_nc, best_dl
 
     def cluster(self,x,nc):
         N = len(x)
         self.model = GMM(nc,n_init=self.n_cluster_inits,covariance_type='diag')
-        self.cluster_labels = self.model.fit_predict(x)
+        try:
+            self.cluster_labels = self.model.fit_predict(x)
+        except ValueError:
+            print(f'failed to cluster with {nc} components, and reg_covar {self.model.reg_covar}')
+            self.model.reg_covar *= 10
+            print(f'trying again with reg_covar {self.model.reg_covar}')
         found_nc = len(np.unique(self.cluster_labels))
         if nc > 1 and self.display_cluster_imgs:
             scatter_clusters(x,self.best_cluster_labels,show=True)
@@ -214,15 +220,14 @@ def info_in_patches(patched_im,subsample):
         subsample_idxs = np.random.choice(len(flattened),size=num_to_subsample,replace=False)
         to_use = flattened[subsample_idxs]
     y = list(set([tuple(z) for z in to_use]))
-    tuples_as_idxs = [y.index(tuple(z)) for z in to_use]
+    tuples_as_idxs = np.array([y.index(tuple(z)) for z in to_use])
     return labels_entropy(tuples_as_idxs)
     #bin_counts = np.bincount(
     #return entropy(bin_counts,base=2)
 
-
-def labels_entropy(labels):
+def labels_entropy(labels: np.array):
     assert labels.ndim == 1
-    bin_counts = np.bincount(self.labels.flatten())
+    bin_counts = np.bincount(labels.flatten())
     return entropy(bin_counts,base=2)
 
 
