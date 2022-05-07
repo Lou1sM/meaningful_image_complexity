@@ -117,9 +117,12 @@ class ComplexityMeasurer():
             if self.print_times:
                 print(f'dim red time: {time()-dim_red_start_time:.2f}')
         N,nz = x.shape
-        data_range_by_axis = x.max(axis=0) - x.min(axis=0)
-        self.len_of_each_cluster = (nz+1)/2 * (np.log2(data_range_by_axis).sum() + 32) # Float precision
-        self.len_of_outlier = np.log2(data_range_by_axis).sum() # Omit the 32 here because implicitly omitted in the model log_prob computation
+        #data_range_by_axis = x.max(axis=0) - x.min(axis=0)
+        #self.len_of_each_cluster = (nz+1)/2 * (np.log2(data_range_by_axis).sum() + 32) # Float precision
+        #self.len_of_outlier = np.log2(data_range_by_axis).sum() # Omit the 32 here because implicitly omitted in the model log_prob computation
+        data_range = x.max() - x.min()
+        self.len_of_each_cluster = 2 * nz * (np.log2(data_range) + 32) # Float precision
+        self.len_of_outlier = nz * np.log2(data_range)
         best_dl = np.inf
         best_nc = -1
         neg_dls_by_dpoint = []
