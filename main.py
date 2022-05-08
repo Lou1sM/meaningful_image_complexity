@@ -7,8 +7,8 @@ import torchvision
 import numpy as np
 from torchvision import models
 from mdl_conv import ComplexityMeasurer
-from load_non_torch_dsets import load_rand
-from create_simple_imgs import create_simple_img
+#from load_non_torch_dsets import load_rand
+from get_dsets import ImageStreamer
 import matplotlib.pyplot as plt
 from dl_utils.tensor_funcs import numpyify
 from dl_utils.misc import check_dir
@@ -33,18 +33,13 @@ parser.add_argument('--show_df',action='store_true')
 parser.add_argument('--is_choose_model_per_dpoint',action='store_true')
 parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand','dtd','stripes','halves'],default='stripes')
 parser.add_argument('--num_ims',type=int,default=1)
-parser.add_argument('--ncs_to_check',type=int,default=10)
+parser.add_argument('--ncs_to_check',type=int,default=2)
+parser.add_argument('--run_sequential',action='store_true')
 parser.add_argument('--n_cluster_inits',type=int,default=1)
 parser.add_argument('--nz',type=int,default=2)
 parser.add_argument('--alg_nz',type=str,choices=['pca','umap','tsne'],default='pca')
 ARGS = parser.parse_args()
 
-if ARGS.dset == 'cifar':
-    dset = torchvision.datasets.CIFAR10(root='~/datasets',download=True,train=True)
-elif ARGS.dset == 'mnist':
-    dset = torchvision.datasets.MNIST(root='~/datasets',train=False,download=True)
-elif ARGS.dset == 'rand':
-    dset = np.random.rand(ARGS.num_ims,224,224,3)
 all_c_idx_infos = []
 all_patch_entropys = []
 comp_meas_kwargs = ARGS.__dict__
@@ -61,41 +56,13 @@ def append_or_add_key(d,key,val):
     except KeyError:
         d[key] = [val]
 
-line_thicknesses = np.random.permutation(np.arange(3,10))
 img_start_times = []
-for i in range(ARGS.num_ims):
+img_times_real = []
+labels = []
+img_streamer = ImageStreamer(ARGS.dset,~ARGS.no_resize)
+for im,label in img_streamer.stream_images(ARGS.num_ims):
+    print(label)
     img_start_times.append(time())
-    if ARGS.dset == 'im':
-        im, label = load_rand('imagenette',~ARGS.no_resize)
-        im = im/255
-        if im.ndim == 2:
-            im = np.resize(im,(*(im.shape),1))
-    elif ARGS.dset == 'dtd':
-        im, label = load_rand('dtd',~ARGS.no_resize)
-        im = im/255
-    elif ARGS.dset == 'stripes':
-        slope = np.random.rand()+.5
-        line_thickness = line_thicknesses[i%len(line_thicknesses)]
-        im = create_simple_img('stripes',slope,line_thickness)
-        label = f'stripes-{line_thickness}'
-    elif ARGS.dset == 'halves':
-        slope = np.random.rand()+.5
-        im = create_simple_img('halves',slope,-1)
-        label = 'halves'
-    elif ARGS.dset == 'rand':
-        im = dset[i]
-        label = 'none'
-    else:
-        idx = np.random.randint(len(dset)) if ARGS.rand_dpoint else i
-        print(idx)
-        if ARGS.dset == 'cifar':
-            im = dset.data[idx]
-            im = np.array(Image.fromarray(im).resize((224,224)))/255
-        elif ARGS.dset == 'mnist':
-            im = numpyify(dset.data[idx])
-            im = np.array(Image.fromarray(im).resize((224,224)))
-            im = np.tile(np.expand_dims(im,2),(1,1,3))
-        label = int(dset.targets[idx])
     if ARGS.display_cluster_imgs:
         plt.imshow(im);plt.show()
     #im_normed = (im-mean)/std
@@ -105,7 +72,9 @@ for i in range(ARGS.num_ims):
     im_unint8 = (greyscale_im*255).astype(np.uint8)
     gclm_ent = glcm_entropy(im_unint8)
     ent = shannon_entropy(im_unint8)
+    img_start_time_real = time()
     new_patch_entropys, ncs, new_c_idx_infos = comp_meas.interpret(im_normed)
+    img_times_real.append(time()-img_start_time_real)
     all_c_idx_infos.append(new_c_idx_infos)
     all_patch_entropys.append(new_patch_entropys)
     jpg = jpg_compression_ratio(im)
@@ -114,21 +83,25 @@ for i in range(ARGS.num_ims):
     redies = redies2012(im)
     c_idx_info = sum(new_c_idx_infos)
     patch_entropy = sum(new_patch_entropys)
-    append_or_add_key(results_dict['patch_ent'],label,patch_entropy)
-    append_or_add_key(results_dict['mdl'],label,c_idx_info)
-    append_or_add_key(results_dict['ncs'],label,ncs)
-    append_or_add_key(results_dict['gclm'],label,gclm_ent)
-    append_or_add_key(results_dict['fract'],label,fractal_dim)
-    append_or_add_key(results_dict['ent'],label,ent)
-    append_or_add_key(results_dict['jpg'],label,jpg)
-    append_or_add_key(results_dict['mach'],label,mach)
-    append_or_add_key(results_dict['khan'],label,khan)
-    append_or_add_key(results_dict['redies'],label,redies)
+    label_for_df = label.split('_')[0] if ARGS.dset in ['im','dtd'] else label
+    append_or_add_key(results_dict['patch_ent'],label_for_df,patch_entropy)
+    append_or_add_key(results_dict['mdl'],label_for_df,c_idx_info)
+    append_or_add_key(results_dict['ncs'],label_for_df,ncs)
+    append_or_add_key(results_dict['gclm'],label_for_df,gclm_ent)
+    append_or_add_key(results_dict['fract'],label_for_df,fractal_dim)
+    append_or_add_key(results_dict['ent'],label_for_df,ent)
+    append_or_add_key(results_dict['jpg'],label_for_df,jpg)
+    append_or_add_key(results_dict['mach'],label_for_df,mach)
+    append_or_add_key(results_dict['khan'],label_for_df,khan)
+    append_or_add_key(results_dict['redies'],label_for_df,redies)
+    labels.append(label)
 
 img_times = [img_start_times[i+1] - imgs for i,imgs in enumerate(img_start_times[:-1])]
-tot_c_time = (img_start_times[-1] - img_start_times[0])/ARGS.num_ims
+avg_img_time = (img_start_times[-1] - img_start_times[0])/ARGS.num_ims
 #print(' '.join([f'{i}: {s:.1f}' for i,s in enumerate(img_times)]) + tot_c_time)
-print(f'Avg time per image: {tot_c_time}')
+avg_img_time_real = np.array(img_times_real).mean()
+print(f'Avg time per image: {avg_img_time}')
+print(f'Avg time per image real: {avg_img_time_real}')
 def build_innerxy_df(class_results_dict):
     dict_of_dicts = {}
     for k,v in class_results_dict.items():
