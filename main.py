@@ -24,6 +24,7 @@ parser.add_argument('--n_cluster_inits',type=int,default=1)
 parser.add_argument('--ncs_to_check',type=int,default=2)
 parser.add_argument('--no_resize',action='store_true')
 parser.add_argument('--num_ims',type=int,default=1)
+parser.add_argument('--num_layers',type=int,default=4)
 parser.add_argument('--nz',type=int,default=2)
 parser.add_argument('--patch_comb_method',type=str,choices=['sum','concat','or'],default='sum')
 parser.add_argument('--print_times',action='store_true')
@@ -41,6 +42,7 @@ mean=[0.485, 0.456, 0.406]
 std=[0.229, 0.224, 0.225]
 single_labels_entropy_by_class = {}
 methods = ['mdl','gclm','fract','ent','ncs','jpg','mach','khan','redies','patch_ent']
+methods += [f'patch_ent{i}' for i in range(ARGS.num_layers)]
 results_dict = {m:{} for m in methods}
 
 def append_or_add_key(d,key,val):
@@ -62,6 +64,8 @@ for im,label in img_streamer.stream_images(ARGS.num_ims):
     new_patch_entropys, ncs, new_single_labels_entropys = comp_meas.interpret(im)
 
     results_dict_for_this_im = {}
+    for i,pe in enumerate(new_patch_entropys):
+        results_dict_for_this_im[f'patch_ent{i}'] = pe
     results_dict_for_this_im['mdl'] = sum(new_single_labels_entropys)
     results_dict_for_this_im['patch_ent'] = sum(new_patch_entropys)
     results_dict_for_this_im['ncs'] = ncs

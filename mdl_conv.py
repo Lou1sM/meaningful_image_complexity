@@ -19,10 +19,11 @@ class ComplexityMeasurer():
     def __init__(self,verbose,ncs_to_check,n_cluster_inits,print_times,
                     display_cluster_imgs,compare_to_true_entropy,
                     is_choose_model_per_dpoint,nz,alg_nz,
-                    subsample,patch_comb_method,
+                    subsample,patch_comb_method,num_layers,
                     cluster_idxify,info_subsample,**kwargs):
 
         self.verbose = verbose
+        self.num_layers = num_layers
         self.print_times = print_times
         self.cluster_idxify = cluster_idxify
         self.compare_to_true_entropy = compare_to_true_entropy
@@ -43,7 +44,7 @@ class ComplexityMeasurer():
         all_single_labels_entropys = []
         all_patch_entropys = []
         self.get_smallest_increment(x)
-        for layer_being_processed in range(4):
+        for layer_being_processed in range(self.num_layers):
             self.layer_being_processed = layer_being_processed
             cluster_start_time = time()
             num_clusters_at_this_level, dl = self.mdl_cluster(x)
