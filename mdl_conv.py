@@ -18,8 +18,8 @@ PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
     def __init__(self,verbose,ncs_to_check,n_cluster_inits,print_times,
                     display_cluster_imgs,compare_to_true_entropy,
-                    is_choose_model_per_dpoint,nz,alg_nz,centroidify,
-                    skip_layers,subsample,patch_comb_method,
+                    is_choose_model_per_dpoint,nz,alg_nz,
+                    subsample,patch_comb_method,
                     cluster_idxify,info_subsample,**kwargs):
 
         self.verbose = verbose
@@ -28,14 +28,12 @@ class ComplexityMeasurer():
         self.compare_to_true_entropy = compare_to_true_entropy
         self.patch_comb_method = patch_comb_method
         self.subsample = subsample
-        self.skip_layers = skip_layers
         self.n_cluster_inits = n_cluster_inits
         self.display_cluster_imgs = display_cluster_imgs
         self.is_choose_model_per_dpoint = is_choose_model_per_dpoint
         self.ncs_to_check = ncs_to_check
         self.nz = nz
         self.alg_nz = alg_nz
-        self.centroidify = centroidify
         self.info_subsample = info_subsample
 
     def interpret(self,given_x):

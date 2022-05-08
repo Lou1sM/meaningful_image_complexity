@@ -1,4 +1,6 @@
 import numpy as np
+from dl_utils.tensor_funcs import numpyify
+import torchvision
 from create_simple_imgs import create_simple_img
 import sys
 from PIL import Image
@@ -44,8 +46,6 @@ def load_fpath(fpath,is_resize):
         if not (new_h_int*new_w_int - 224*224) < max_possible_error:
             breakpoint()
         im = im.resize((new_h_int,new_w_int))
-    #class_name = imagenette_synset_dict[class_dir] if dset=='imagenette' else fname.split('_')[0]
-    #return np.array(im), class_name
     return np.array(im)
 
 def generate_non_torch_im(dset,is_resize,subsample):
@@ -53,7 +53,6 @@ def generate_non_torch_im(dset,is_resize,subsample):
         dset_dir = 'imagenette2/val'
     elif dset=='dtd':
         dset_dir = 'dtd/suitable'
-    #for i,fname in enumerate(listdir(class_dir_path)):
     for i in range(subsample):
         if dset=='imagenette':
             num_classes = len(listdir(dset_dir))
@@ -126,16 +125,13 @@ class ImageStreamer():
                 im = self.prepared_dset[i]
                 label = 'rand'
             else:
-                #idx = np.random.randint(len(self.dset)) if ARGS.rand_dpoint else i
-                #indices = np.random.randint(len(self.dset)) if ARGS.rand_dpoint else i
-                print(idx)
                 if self.dset == 'cifar':
-                    im = self.prepared_dset.data[idx]
+                    im = self.prepared_dset.data[i]
                     im = np.array(Image.fromarray(im).resize((224,224)))/255
                 elif self.dset == 'mnist':
-                    im = numpyify(self.prepared_dset.data[idx])
+                    im = numpyify(self.prepared_dset.data[i])
                     im = np.array(Image.fromarray(im).resize((224,224)))
                     im = np.tile(np.expand_dims(im,2),(1,1,3))
-                label = int(self.prepared_dset.targets[idx])
+                label = str(self.prepared_dset.targets[i])
             yield im, label
 
