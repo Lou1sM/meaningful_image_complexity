@@ -90,6 +90,9 @@ class ImageStreamer():
     def stream_images(self,num_ims):
         if self.dset in ['cifar','mnist','usps']:
             indices = np.random.choice(len(self.prepared_dset),size=num_ims,replace=False)
+        elif self.dset == 'dtd':
+            n = max(len(listdir('dtd/suitable')),num_ims)
+            indices = range(n)
         else: indices = range(num_ims)
 
         for i in indices:
@@ -128,10 +131,11 @@ class ImageStreamer():
                 if self.dset == 'cifar':
                     im = self.prepared_dset.data[i]
                     im = np.array(Image.fromarray(im).resize((224,224)))/255
+                    label = str(self.prepared_dset.targets[i])
                 elif self.dset == 'mnist':
                     im = numpyify(self.prepared_dset.data[i])
                     im = np.array(Image.fromarray(im).resize((224,224)))
                     im = np.tile(np.expand_dims(im,2),(1,1,3))
-                label = str(self.prepared_dset.targets[i])
+                    label = str(self.prepared_dset.targets[i].item())
             yield im, label
 

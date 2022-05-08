@@ -109,16 +109,18 @@ mean_var_results = {method_k:{class_k:{'mean':np.array(v).mean(),'var':np.array(
                     for method_k,method_v in results_dict.items()}
 results_by_method = [pd.DataFrame(build_innerxy_df(d)).T for d in results_dict.values()]
 mi_df_for_this_dset = pd.concat(results_by_method,axis=0,keys=results_dict.keys())
-all_df_for_this_dset = pd.DataFrame([x['all'] for x in results_dict.values()],index=results_dict.keys(),columns=['mean','var','std'])
+alls_results_ = [np.array(x['all']) for x in results_dict.values()]
+alls_results = [(x.mean(),x.var(),x.std()) for x in alls_results_]
+alls_df = pd.DataFrame(alls_results,index=results_dict.keys(),columns=['mean','var','std'])
 check_dir(f'experiments/{ARGS.exp_name}')
 mi_df_for_this_dset.to_csv(f'experiments/{ARGS.exp_name}/{ARGS.dset}_results_by_class.csv')
-all_df_for_this_dset.to_csv(f'experiments/{ARGS.exp_name}/{ARGS.dset}_results.csv')
+alls_df.to_csv(f'experiments/{ARGS.exp_name}/{ARGS.dset}_results.csv')
 with open(f'experiments/{ARGS.exp_name}/ims_used.txt','w') as f:
     for lab in labels:
         f.write(lab + '\n')
 if ARGS.show_df:
     print(mi_df_for_this_dset)
-    print(all_df_for_this_dset)
+    print(alls_df)
 mean_single_labels_entropy = np.array(all_single_labels_entropys).mean(axis=0)
 mean_patch_entropys = np.array(all_patch_entropys).mean(axis=0)
 print(*[f'{m:.3f}' for m in mean_single_labels_entropy], f'total:{mean_single_labels_entropy.sum():.3f}')
