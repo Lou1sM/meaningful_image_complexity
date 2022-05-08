@@ -6,7 +6,9 @@ from mdl_conv import ComplexityMeasurer
 #from load_non_torch_dsets import load_rand
 from get_dsets import ImageStreamer
 import matplotlib.pyplot as plt
-from dl_utils.misc import check_dir
+from os.path import join,isdir
+import sys
+from dl_utils.misc import check_dir, get_user_yesno_answer
 from baselines import rgb2gray, compute_fractal_dimension, glcm_entropy, machado2015, jpg_compression_ratio, khan2021, redies2012
 from skimage.measure import shannon_entropy
 
@@ -26,6 +28,7 @@ parser.add_argument('--no_resize',action='store_true')
 parser.add_argument('--num_ims',type=int,default=1)
 parser.add_argument('--num_layers',type=int,default=4)
 parser.add_argument('--nz',type=int,default=2)
+parser.add_argument('--overwrite',action='store_true')
 parser.add_argument('--patch_comb_method',type=str,choices=['sum','concat','or'],default='sum')
 parser.add_argument('--print_times',action='store_true')
 parser.add_argument('--rand_dpoint',action='store_true')
@@ -34,6 +37,14 @@ parser.add_argument('--subsample',type=float,default=1)
 parser.add_argument('--verbose','-v',action='store_true')
 ARGS = parser.parse_args()
 
+exp_dir = f'experiments/{ARGS.exp_name}'
+if (isdir(exp_dir) and
+    not ARGS.exp_name.endswith('jim') and not ARGS.overwrite):
+    is_overwrite = get_user_yesno_answer(f'experiment {ARGS.exp_name} already exists, overwrite?')
+    if not is_overwrite:
+        print('aborting')
+        sys.exit()
+check_dir(exp_dir)
 all_single_labels_entropys = []
 all_patch_entropys = []
 comp_meas_kwargs = ARGS.__dict__
@@ -112,10 +123,9 @@ mi_df_for_this_dset = pd.concat(results_by_method,axis=0,keys=results_dict.keys(
 alls_results_ = [np.array(x['all']) for x in results_dict.values()]
 alls_results = [(x.mean(),x.var(),x.std()) for x in alls_results_]
 alls_df = pd.DataFrame(alls_results,index=results_dict.keys(),columns=['mean','var','std'])
-check_dir(f'experiments/{ARGS.exp_name}')
-mi_df_for_this_dset.to_csv(f'experiments/{ARGS.exp_name}/{ARGS.dset}_results_by_class.csv')
-alls_df.to_csv(f'experiments/{ARGS.exp_name}/{ARGS.dset}_results.csv')
-with open(f'experiments/{ARGS.exp_name}/ims_used.txt','w') as f:
+mi_df_for_this_dset.to_csv(join(exp_dir,f'{ARGS.dset}_results_by_class.csv'),index=True)
+alls_df.to_csv(join(exp_dir,f'{ARGS.dset}_results.csv'),index=True)
+with open(join(exp_dir,'ims_used.txt'),'w') as f:
     for lab in labels:
         f.write(lab + '\n')
 if ARGS.show_df:
