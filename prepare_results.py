@@ -10,6 +10,8 @@ exp_name = sys.argv[1]
 serieses = []
 for d in dsets:
     df = pd.read_csv(f'experiments/{exp_name}/{d}/{d}_results_by_class.csv',index_col=[0,1])
+    df_no_mdl = pd.read_csv(f'experiments/{exp_name}/{d}_no_mdl_abl.csv',index_col=[0])
+    breakpoint()
     df = filter_nans_from_df(df)
     df_alls = make_alls_df(df)
     df_alls = df_alls.drop('raw',axis=1)
