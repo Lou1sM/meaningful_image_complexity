@@ -1,5 +1,5 @@
 import argparse
-from utils import append_or_add_key, build_innerxy_df, results_dict_to_df
+from utils import append_or_add_key, results_dict_to_df, make_alls_df
 from time import time
 import pandas as pd
 import numpy as np
@@ -66,14 +66,16 @@ for im,label in img_streamer.stream_images(ARGS.num_ims):
     if ARGS.display_cluster_imgs:
         plt.imshow(im);plt.show()
     im_normed = im
+    comp_meas.is_mdl_abl = True
+    no_mdls, _, _ = comp_meas.interpret(im)
+    comp_meas.is_mdl_abl = False
     new_patch_entropys, ncs, new_single_labels_entropys = comp_meas.interpret(im)
-    #no_mdls, _, _ = comp_meas.interpret(im,mdl_abl=True)
 
     results_dict_for_this_im = {}
     for i,pe in enumerate(new_patch_entropys):
         results_dict_for_this_im[f'patch_ent{i}'] = pe
     results_dict_for_this_im['no_patch'] = sum(new_single_labels_entropys)
-    #results_dict_for_this_im['no_mdl'] = sum(no_mdls)
+    results_dict_for_this_im['no_mdl'] = sum(no_mdls)
     results_dict_for_this_im['patch_ent'] = sum(new_patch_entropys)
     results_dict_for_this_im['ncs'] = ncs
     greyscale_im = rgb2gray(im)
@@ -95,8 +97,9 @@ for im,label in img_streamer.stream_images(ARGS.num_ims):
         append_or_add_key(results_dict[m],'all',r)
     labels.append(label)
 
+img_start_times.append(time())
 img_times = [img_start_times[i+1] - imgs for i,imgs in enumerate(img_start_times[:-1])]
-avg_img_time = (img_start_times[-1] - img_start_times[0])/(ARGS.num_ims-1)
+avg_img_time = (img_start_times[-1] - img_start_times[0])/ARGS.num_ims
 avg_img_time_real = np.array(img_times_real).mean()
 print(f'Avg time per image: {avg_img_time}')
 print(f'Avg time per image real: {avg_img_time_real}')

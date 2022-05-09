@@ -36,6 +36,7 @@ class ComplexityMeasurer():
         self.nz = nz
         self.alg_nz = alg_nz
         self.info_subsample = info_subsample
+        self.is_mdl_abl = False
 
     def interpret(self,given_x):
         img_start_time = time()
@@ -49,8 +50,6 @@ class ComplexityMeasurer():
             cluster_start_time = time()
             num_clusters_at_this_level, dl = self.mdl_cluster(x)
             single_labels_entropy = labels_entropy(self.best_cluster_labels.flatten())
-            #bin_counts = np.bincount(self.best_cluster_labels.flatten())
-            #single_labels_entropy = entropy(bin_counts)
             if self.print_times:
                 print(f'mdl_cluster time: {time()-cluster_start_time:.2f}')
             total_num_clusters += num_clusters_at_this_level
@@ -93,7 +92,7 @@ class ComplexityMeasurer():
             proj_clusters_as_img = self.apply_conv_layer(prev_clabs_as_img,custom_cnvl=self.dummy_downsample_rlayer)
         return proj_clusters_as_img.flatten().round().astype(int)
 
-    def mdl_cluster(self,x_as_img):
+    def mdl_cluster(self,x_as_img,fixed_nc=-1):
         full_x = x_as_img
         full_x = full_x.reshape(-1,full_x.shape[-1])
         if self.subsample != 1:
@@ -118,20 +117,14 @@ class ComplexityMeasurer():
             if self.print_times:
                 print(f'dim red time: {time()-dim_red_start_time:.2f}')
         N,nz = x.shape
-        #data_range_by_axis = x.max(axis=0) - x.min(axis=0)
-        #self.len_of_each_cluster = (nz+1)/2 * (np.log2(data_range_by_axis).sum() + 32) # Float precision
-        #self.len_of_outlier = np.log2(data_range_by_axis).sum() # Omit the 32 here because implicitly omitted in the model log_prob computation
         data_range = x.max() - x.min()
         self.len_of_each_cluster = 2 * nz * (np.log2(data_range) + 32) # Float precision
         self.len_of_outlier = nz * np.log2(data_range)
         best_dl = np.inf
         best_nc = -1
-        neg_dls_by_dpoint = []
-        idxs_lens = []
-        all_rs = []
-        all_ts = []
         nc_start_times = []
-        for nc in range(1,self.ncs_to_check+1):
+        ncs_to_check = [5] if self.is_mdl_abl else range(1,self.ncs_to_check+1)
+        for nc in ncs_to_check:
             nc_start_times.append(time())
             found_nc = self.cluster(x,nc)
             if found_nc == nc-1:
@@ -141,10 +134,6 @@ class ComplexityMeasurer():
                         f'Err: {self.residuals.sum():.3f}\t'
                         f'Idxs: {self.idxs_len_per_dpoint.sum():.3f}\t'
                         f'O: {self.outliers.sum()} {self.len_outliers.sum():.3f}'))
-            #all_rs.append(self.residuals)
-            #all_ts.append(self.dl_by_dpoint)
-            #idxs_lens.append(self.idxs_len_per_dpoint)
-            #neg_dls_by_dpoint.append(-self.dl_by_dpoint)
             if self.dl_by_dpoint.sum() < best_dl:
                 best_dl = self.dl_by_dpoint.sum()
                 best_nc = nc
@@ -156,16 +145,6 @@ class ComplexityMeasurer():
         if self.subsample != 1:
             self.cluster(full_x,best_nc)
             self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
-        if self.subsample != 1:
-            weighted = self.idxs_len_per_dpoint.sum()
-        #idxs_lens_array = np.stack(idxs_lens,axis=1)
-        #log_likelihood_per_dpoint = np.stack(neg_dls_by_dpoint,axis=1)
-        #if self.is_choose_model_per_dpoint:
-            #posterior_per_dpoint = softmax(log_likelihood_per_dpoint,axis=1)
-            #weighted = (idxs_lens_array * posterior_per_dpoint).sum()
-        #else:
-            #posterior_for_dset = softmax(log_likelihood_per_dpoint.sum(axis=0))
-            #weighted = np.dot(idxs_lens_array.sum(axis=0), posterior_for_dset)
         return best_nc, best_dl
 
     def cluster(self,x,nc):
@@ -177,6 +156,7 @@ class ComplexityMeasurer():
             print(f'failed to cluster with {nc} components, and reg_covar {self.model.reg_covar}')
             self.model.reg_covar *= 10
             print(f'trying again with reg_covar {self.model.reg_covar}')
+            self.cluster_labels = self.model.fit_predict(x)
         found_nc = len(np.unique(self.cluster_labels))
         if nc > 1 and self.display_cluster_imgs:
             scatter_clusters(x,self.best_cluster_labels,show=True)
@@ -231,7 +211,6 @@ def labels_entropy(labels: np.array):
     assert labels.ndim == 1
     bin_counts = np.bincount(labels.flatten())
     return entropy(bin_counts,base=2)
-
 
 def info_in_label_counts(labels):
     assert labels.ndim == 1
