@@ -91,7 +91,7 @@ class ImageStreamer():
         if self.dset in ['cifar','mnist','usps']:
             indices = np.random.choice(len(self.prepared_dset),size=num_ims,replace=False)
         elif self.dset == 'dtd':
-            n = max(len(listdir('dtd/suitable')),num_ims)
+            n = min(len(listdir('dtd/suitable')),num_ims)
             indices = range(n)
         else: indices = range(num_ims)
 

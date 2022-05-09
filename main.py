@@ -1,12 +1,12 @@
 import argparse
+from utils import append_or_add_key, build_innerxy_df, results_dict_to_df
 from time import time
 import pandas as pd
 import numpy as np
 from mdl_conv import ComplexityMeasurer
-#from load_non_torch_dsets import load_rand
 from get_dsets import ImageStreamer
 import matplotlib.pyplot as plt
-from os.path import join,isdir
+from os.path import join,isdir,isfile
 import sys
 from dl_utils.misc import check_dir, get_user_yesno_answer
 from baselines import rgb2gray, compute_fractal_dimension, glcm_entropy, machado2015, jpg_compression_ratio, khan2021, redies2012
@@ -37,10 +37,10 @@ parser.add_argument('--subsample',type=float,default=1)
 parser.add_argument('--verbose','-v',action='store_true')
 ARGS = parser.parse_args()
 
-exp_dir = f'experiments/{ARGS.exp_name}'
-if (isdir(exp_dir) and
+exp_dir = f'experiments/{ARGS.exp_name}/{ARGS.dset}'
+if (isfile(join(exp_dir,f'{ARGS.dset}_results.csv')) and
     not ARGS.exp_name.endswith('jim') and not ARGS.overwrite):
-    is_overwrite = get_user_yesno_answer(f'experiment {ARGS.exp_name} already exists, overwrite?')
+    is_overwrite = get_user_yesno_answer(f'experiment {ARGS.exp_name}/{ARGS.dset} already exists, overwrite?')
     if not is_overwrite:
         print('aborting')
         sys.exit()
@@ -52,15 +52,9 @@ comp_meas = ComplexityMeasurer(**comp_meas_kwargs)
 mean=[0.485, 0.456, 0.406]
 std=[0.229, 0.224, 0.225]
 single_labels_entropy_by_class = {}
-methods = ['mdl','gclm','fract','ent','ncs','jpg','mach','khan','redies','patch_ent']
+methods = ['no_patch','no_mdl','gclm','fract','ent','ncs','jpg','mach','khan','redies','patch_ent']
 methods += [f'patch_ent{i}' for i in range(ARGS.num_layers)]
 results_dict = {m:{} for m in methods}
-
-def append_or_add_key(d,key,val):
-    try:
-        d[key].append(val)
-    except KeyError:
-        d[key] = [val]
 
 img_start_times = []
 img_times_real = []
@@ -73,11 +67,13 @@ for im,label in img_streamer.stream_images(ARGS.num_ims):
         plt.imshow(im);plt.show()
     im_normed = im
     new_patch_entropys, ncs, new_single_labels_entropys = comp_meas.interpret(im)
+    #no_mdls, _, _ = comp_meas.interpret(im,mdl_abl=True)
 
     results_dict_for_this_im = {}
     for i,pe in enumerate(new_patch_entropys):
         results_dict_for_this_im[f'patch_ent{i}'] = pe
-    results_dict_for_this_im['mdl'] = sum(new_single_labels_entropys)
+    results_dict_for_this_im['no_patch'] = sum(new_single_labels_entropys)
+    #results_dict_for_this_im['no_mdl'] = sum(no_mdls)
     results_dict_for_this_im['patch_ent'] = sum(new_patch_entropys)
     results_dict_for_this_im['ncs'] = ncs
     greyscale_im = rgb2gray(im)
@@ -106,30 +102,22 @@ print(f'Avg time per image: {avg_img_time}')
 print(f'Avg time per image real: {avg_img_time_real}')
 
 
-def build_innerxy_df(class_results_dict):
-    dict_of_dicts = {}
-    for k,v in class_results_dict.items():
-        ar = np.array(v)
-        mean = ar.mean()
-        var,std = (ar.var(), ar.std()) if len(v) > 1 else (0,0)
-        dict_of_dicts[k] = {'mean':mean,'var':var,'std':std,'raw':ar}
-    return dict_of_dicts
-
 mean_var_results = {method_k:{class_k:{'mean':np.array(v).mean(),'var':np.array(v).mean()}
                     for class_k,v in method_v.items()}
                     for method_k,method_v in results_dict.items()}
-results_by_method = [pd.DataFrame(build_innerxy_df(d)).T for d in results_dict.values()]
-mi_df_for_this_dset = pd.concat(results_by_method,axis=0,keys=results_dict.keys())
-alls_results_ = [np.array(x['all']) for x in results_dict.values()]
-alls_results = [(x.mean(),x.var(),x.std()) for x in alls_results_]
-alls_df = pd.DataFrame(alls_results,index=results_dict.keys(),columns=['mean','var','std'])
-mi_df_for_this_dset.to_csv(join(exp_dir,f'{ARGS.dset}_results_by_class.csv'),index=True)
+df_for_this_dset = results_dict_to_df(results_dict)
+alls_df = make_alls_df(df_for_this_dset)
+df_for_this_dset.to_csv(join(exp_dir,f'{ARGS.dset}_results_by_class.csv'),index=True)
 alls_df.to_csv(join(exp_dir,f'{ARGS.dset}_results.csv'),index=True)
-with open(join(exp_dir,'ims_used.txt'),'w') as f:
+with open(join(exp_dir,f'{ARGS.dset}_ims_used.txt'),'w') as f:
     for lab in labels:
         f.write(lab + '\n')
+with open(join(exp_dir,f'{ARGS.dset}_ARGS.txt'),'w') as f:
+    for a in dir(ARGS):
+        if not a.startswith('_'):
+           f.write(f'{a}: {getattr(ARGS,a)}'+ '\n')
 if ARGS.show_df:
-    print(mi_df_for_this_dset)
+    print(df_for_this_dset)
     print(alls_df)
 mean_single_labels_entropy = np.array(all_single_labels_entropys).mean(axis=0)
 mean_patch_entropys = np.array(all_patch_entropys).mean(axis=0)
