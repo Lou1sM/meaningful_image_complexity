@@ -7,14 +7,15 @@ import numpy as np
 from mdl_conv import ComplexityMeasurer
 from os.path import join
 from os import listdir
+import math
 from get_dsets import load_fpath
 
 
 def save_from_results_list(results_list,dset):
-    results_arr = np.array(results_list)
+    results_arr = np.array([r for r in results_list if not math.isnan(r)])
     df = pd.DataFrame({'mean':results_arr.mean(), 'var':results_arr.var(), 'std':results_arr.std()},index=[dset])
-    df.to_csv(f'experiments/main_run/{dset}_no_mdl_abl.csv')
-    np.save(f'experiments/main_run/{dset}_no_mdl_abl_raw.npy',results_arr)
+    df.to_csv(f'experiments/main_run/mdl_abls/{dset}_no_mdl_abl.csv')
+    np.save(f'experiments/main_run/mdl_abls/{dset}_no_mdl_abl_raw.npy',results_arr)
     print(df)
 
 if __name__ == '__main__':
@@ -97,7 +98,7 @@ if __name__ == '__main__':
             no_mdls, _, _ = comp_meas.interpret(im)
             results_list.append(sum(no_mdls))
 
-        save_from_results_list(results_list,'im')
+        save_from_results_list(results_list,'cifar')
 
     elif sys.argv[1] == 'dtd':
         # dtd
