@@ -135,7 +135,7 @@ if __name__ == '__main__':
 
     elif sys.argv[1] == 'mnist':
         # mnist
-        with open(f'experiments/main_run_old/mnist/mnist_ims_used.txt') as f:
+        with open(f'experiments/main_run_old/mnist_ims_used.txt') as f:
             mnist_ims_used = [x.strip('\n') for x in f.readlines()]
         with open(f'experiments/main_run_old/mnist_ARGS.txt') as f:
             mnist_ARGS = f.readlines()
@@ -158,7 +158,8 @@ if __name__ == '__main__':
         comp_meas.is_mdl_abl = True
         results_list = []
         torch_dset = torchvision.datasets.CIFAR10(root='~/datasets',download=True,train=True)
-        for i,im_used_idx in enumerate(cifar_ims_used):
+        for i,im_used_idx in enumerate(mnist_ims_used):
+            print(i)
             im = torch_dset.data[int(im_used_idx)]
             im = np.array(Image.fromarray(im).resize((224,224)))/255
             no_mdls, _, _ = comp_meas.interpret(im)
