@@ -9,7 +9,8 @@ from os.path import join
 from os import listdir
 import math
 from get_dsets import load_fpath
-from dl_utils import check_dir
+from dl_utils.misc import check_dir
+from dl_utils.tensor_funcs import numpyify
 
 
 def save_from_results_list(results_list,dset):
@@ -21,11 +22,14 @@ def save_from_results_list(results_list,dset):
     np.save(join(mdl_abl_dir,f'{dset}_no_mdl_abl_raw.npy'),results_arr)
     print(df)
 
+def get_used_ims(fpath):
+    with open(fpath) as f:
+        return [x.strip('\n') for x in f.readlines()]
+
 if __name__ == '__main__':
     # im
     if sys.argv[1] == 'im':
-        with open(f'experiments/main_run_old/im_ims_used.txt') as f:
-            im_ims_used = [x.strip('\n') for x in f.readlines()]
+        im_ims_used = get_used_ims('experiments/main_run_old/im_ims_used.txt')
         with open(f'experiments/main_run_old/im_ARGS.txt') as f:
             im_ARGS = f.readlines()
             im_ARGS = dict([x.strip('\n').split(': ') for x in im_ARGS])
@@ -70,8 +74,7 @@ if __name__ == '__main__':
 
     # cifar
     elif sys.argv[1] == 'cifar':
-        with open(f'experiments/main_run/cifar/cifar_ims_used.txt') as f:
-            cifar_ims_used = [x.strip('\n') for x in f.readlines()]
+        cifar_ims_used = get_used_ims('experiments/main_run/cifar/cifar_ims_used.txt')
         with open(f'experiments/main_run/cifar/cifar_ARGS.txt') as f:
             cifar_ARGS = f.readlines()
             cifar_ARGS = dict([x.strip('\n').split(': ') for x in cifar_ARGS])
@@ -138,8 +141,7 @@ if __name__ == '__main__':
 
     elif sys.argv[1] == 'mnist':
         # mnist
-        with open(f'experiments/main_run_old/mnist_ims_used.txt') as f:
-            mnist_ims_used = [x.strip('\n') for x in f.readlines()]
+        mnist_ims_used = get_used_ims('experiments/main_run_old/mnist_ims_used.txt')
         with open(f'experiments/main_run_old/mnist_ARGS.txt') as f:
             mnist_ARGS = f.readlines()
             mnist_ARGS = dict([x.strip('\n').split(': ') for x in mnist_ARGS])
@@ -160,11 +162,12 @@ if __name__ == '__main__':
         comp_meas = ComplexityMeasurer(**mnist_ARGS)
         comp_meas.is_mdl_abl = True
         results_list = []
-        torch_dset = torchvision.datasets.CIFAR10(root='~/datasets',download=True,train=True)
+        torch_dset = torchvision.datasets.MNIST(root='~/datasets',download=True,train=True)
         for i,im_used_idx in enumerate(mnist_ims_used):
             print(i)
-            im = torch_dset.data[int(im_used_idx)]
+            im = numpyify(torch_dset.data[int(im_used_idx)])
             im = np.array(Image.fromarray(im).resize((224,224)))/255
+            im = np.tile(np.expand_dims(im,2),(1,1,3))
             no_mdls, _, _ = comp_meas.interpret(im)
             results_list.append(sum(no_mdls))
 
