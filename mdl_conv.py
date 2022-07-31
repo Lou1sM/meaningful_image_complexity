@@ -251,3 +251,8 @@ def patch_averages(a):
 def torch_min(t,val):
     """return the minimum of val (float) and t (tensor), with val broadcast"""
     return torch.minimum(t,val*torch.ones_like(t))
+
+def sum_logs(labels):
+    counts = np.bincount(labels)
+    log_counts = np.log2(counts)
+    return log_counts.sum()

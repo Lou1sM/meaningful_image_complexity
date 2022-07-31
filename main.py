@@ -51,7 +51,7 @@ all_patch_entropys = []
 comp_meas_kwargs = ARGS.__dict__
 comp_meas = ComplexityMeasurer(**comp_meas_kwargs)
 single_labels_entropy_by_class = {}
-methods = ['no_patch','no_mdl','gclm','fract','ent','ncs','jpg','mach','khan','redies','patch_ent']
+methods = ['no_patch','no_mdl','glcm','fract','ent','ncs','jpg','mach','khan','redies','patch_ent']
 methods += [f'patch_ent{i}' for i in range(ARGS.num_layers)]
 results_dict = {m:{} for m in methods}
 
@@ -75,8 +75,11 @@ for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims)):
         no_mdls, _, _ = comp_meas.interpret(im)
         comp_meas.is_mdl_abl = False
     else:
-        no_mdls = [-1,-1,-1,-1]
+        no_mdls = [0]
     img_start_time_real = time()
+    comp_meas.is_mdl_abl = True
+    #no_mdls, _, _ = comp_meas.interpret(im)
+    comp_meas.is_mdl_abl = False
     new_patch_entropys, ncs, new_single_labels_entropys = comp_meas.interpret(im)
     img_times_real.append(time()-img_start_time_real)
 
@@ -90,7 +93,7 @@ for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims)):
     greyscale_im = rgb2gray(im)
     results_dict_for_this_im['fract'] = compute_fractal_dimension(greyscale_im)
     im_unint8 = (greyscale_im*255).astype(np.uint8)
-    results_dict_for_this_im['gclm'] = glcm_entropy(im_unint8)
+    results_dict_for_this_im['glcm'] = glcm_entropy(im_unint8)
     results_dict_for_this_im['ent'] = shannon_entropy(im_unint8)
     all_single_labels_entropys.append(new_single_labels_entropys)
     all_patch_entropys.append(new_patch_entropys)
