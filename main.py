@@ -1,12 +1,11 @@
 import argparse
 from utils import append_or_add_key, results_dict_to_df, make_alls_df
 from time import time
-import pandas as pd
 import numpy as np
 from mdl_conv import ComplexityMeasurer
 from get_dsets import ImageStreamer
 import matplotlib.pyplot as plt
-from os.path import join,isdir,isfile
+from os.path import join,isfile
 import sys
 from dl_utils.misc import check_dir, get_user_yesno_answer
 from baselines import rgb2gray, compute_fractal_dimension, glcm_entropy, machado2015, jpg_compression_ratio, khan2021, redies2012
@@ -20,7 +19,9 @@ parser.add_argument('--compare_to_true_entropy',action='store_true')
 parser.add_argument('--display_cluster_imgs',action='store_true')
 parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand','dtd','stripes','halves'],default='stripes')
 parser.add_argument('--exp_name',type=str,default='jim')
+parser.add_argument('--include_mdl_abl',action='store_true')
 parser.add_argument('--info_subsample',type=float,default=1)
+parser.add_argument('--gaussian_noisify',type=float,default=0.)
 parser.add_argument('--is_choose_model_per_dpoint',action='store_true')
 parser.add_argument('--n_cluster_inits',type=int,default=1)
 parser.add_argument('--ncs_to_check',type=int,default=2)
@@ -49,8 +50,6 @@ all_single_labels_entropys = []
 all_patch_entropys = []
 comp_meas_kwargs = ARGS.__dict__
 comp_meas = ComplexityMeasurer(**comp_meas_kwargs)
-mean=[0.485, 0.456, 0.406]
-std=[0.229, 0.224, 0.225]
 single_labels_entropy_by_class = {}
 methods = ['no_patch','no_mdl','gclm','fract','ent','ncs','jpg','mach','khan','redies','patch_ent']
 methods += [f'patch_ent{i}' for i in range(ARGS.num_layers)]
@@ -60,16 +59,26 @@ img_start_times = []
 img_times_real = []
 labels = []
 img_streamer = ImageStreamer(ARGS.dset,~ARGS.no_resize)
-for im,label in img_streamer.stream_images(ARGS.num_ims):
-    print(label)
+for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims)):
+    print(idx)
+    if ARGS.gaussian_noisify > 0:
+        noise = np.random.randn(*im.shape)
+        im += ARGS.gaussian_noisify*noise
+        im = np.clip(im,0,1)
+
     img_start_times.append(time())
     if ARGS.display_cluster_imgs:
         plt.imshow(im);plt.show()
     im_normed = im
-    comp_meas.is_mdl_abl = True
-    no_mdls, _, _ = comp_meas.interpret(im)
-    comp_meas.is_mdl_abl = False
+    if ARGS.include_mdl_abl:
+        comp_meas.is_mdl_abl = True
+        no_mdls, _, _ = comp_meas.interpret(im)
+        comp_meas.is_mdl_abl = False
+    else:
+        no_mdls = [-1,-1,-1,-1]
+    img_start_time_real = time()
     new_patch_entropys, ncs, new_single_labels_entropys = comp_meas.interpret(im)
+    img_times_real.append(time()-img_start_time_real)
 
     results_dict_for_this_im = {}
     for i,pe in enumerate(new_patch_entropys):
@@ -83,8 +92,6 @@ for im,label in img_streamer.stream_images(ARGS.num_ims):
     im_unint8 = (greyscale_im*255).astype(np.uint8)
     results_dict_for_this_im['gclm'] = glcm_entropy(im_unint8)
     results_dict_for_this_im['ent'] = shannon_entropy(im_unint8)
-    img_start_time_real = time()
-    img_times_real.append(time()-img_start_time_real)
     all_single_labels_entropys.append(new_single_labels_entropys)
     all_patch_entropys.append(new_patch_entropys)
     results_dict_for_this_im['jpg'] = jpg_compression_ratio(im)

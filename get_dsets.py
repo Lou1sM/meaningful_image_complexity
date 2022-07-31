@@ -134,8 +134,8 @@ class ImageStreamer():
                     label = str(self.prepared_dset.targets[i])
                 elif self.dset == 'mnist':
                     im = numpyify(self.prepared_dset.data[i])
+                    im = im.astype(float)/255
                     im = np.array(Image.fromarray(im).resize((224,224)))
                     im = np.tile(np.expand_dims(im,2),(1,1,3))
                     label = str(self.prepared_dset.targets[i].item())
             yield im, label
-
