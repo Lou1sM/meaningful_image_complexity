@@ -17,8 +17,11 @@ parser.add_argument('--alg_nz',type=str,choices=['pca','umap','tsne'],default='p
 parser.add_argument('--cluster_idxify',action='store_true')
 parser.add_argument('--compare_to_true_entropy',action='store_true')
 parser.add_argument('--display_cluster_imgs',action='store_true')
-parser.add_argument('--dset',type=str,choices=['im','cifar','mnist','rand','dtd','stripes','halves'],default='stripes')
+parser.add_argument('-d','--dset',type=str,choices=['im','cifar','mnist','rand','dtd','stripes','halves'],default='stripes')
+parser.add_argument('--downsample',type=int,default=-1)
 parser.add_argument('--exp_name',type=str,default='jim')
+parser.add_argument('--given_fname',type=str,default='none')
+parser.add_argument('--given_class_dir',type=str,default='none')
 parser.add_argument('--include_mdl_abl',action='store_true')
 parser.add_argument('--info_subsample',type=float,default=1)
 parser.add_argument('--gaussian_noisify',type=float,default=0.)
@@ -59,8 +62,12 @@ img_start_times = []
 img_times_real = []
 labels = []
 img_streamer = ImageStreamer(ARGS.dset,~ARGS.no_resize)
-for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims)):
-    print(idx)
+for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.downsample,ARGS.given_fname,ARGS.given_class_dir)):
+    print(idx, label)
+    plt.axis('off')
+    #plt.imshow(im); plt.show()
+    plt.imshow(im); plt.savefig('image_just_used.png')
+    #im = np.round(im)
     if ARGS.gaussian_noisify > 0:
         noise = np.random.randn(*im.shape)
         im += ARGS.gaussian_noisify*noise

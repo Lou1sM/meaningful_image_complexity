@@ -33,7 +33,7 @@ def load_rand(dset,is_resize=False):
     print(fname)
     return load_fpath(fpath,is_resize)
 
-def load_fpath(fpath,is_resize):
+def load_fpath(fpath,is_resize,downsample):
     im = Image.open(fpath)
     if is_resize:
         h,w = im.size[:2]
@@ -45,6 +45,8 @@ def load_fpath(fpath,is_resize):
         max_possible_error = (new_h_int + new_w_int) / 2
         if not (new_h_int*new_w_int - 224*224) < max_possible_error:
             breakpoint()
+        if downsample != -1:
+            im = im.resize((downsample,downsample))
         im = im.resize((new_h_int,new_w_int))
     return np.array(im)
 
@@ -87,7 +89,7 @@ class ImageStreamer():
             self.line_thicknesses = np.random.permutation(np.arange(3,10))
 
 
-    def stream_images(self,num_ims):
+    def stream_images(self,num_ims,downsample,given_fname='none',given_class_dir='none'):
         if self.dset in ['cifar','mnist','usps']:
             indices = np.random.choice(len(self.prepared_dset),size=num_ims,replace=False)
         elif self.dset == 'dtd':
@@ -99,18 +101,18 @@ class ImageStreamer():
             if self.dset in ['im','dtd']:
                 if self.dset=='im':
                     num_classes = len(listdir(self.dset_dir))
-                    class_dir = listdir(self.dset_dir)[i%num_classes]
+                    class_dir = given_class_dir if given_class_dir != 'none' else listdir(self.dset_dir)[i%num_classes]
                     idx_within_class = i//num_classes
-                    fname = listdir(join(self.dset_dir,class_dir))[idx_within_class]
+                    fname = given_fname if given_fname != 'none' else listdir(join(self.dset_dir,class_dir))[idx_within_class]
                     fpath = join(self.dset_dir,class_dir,fname)
                 elif self.dset=='dtd':
                     try:
-                        fname = listdir(self.dset_dir)[i]
+                        fname = given_fname if given_fname != 'none' else listdir(self.dset_dir)[i]
                     except IndexError:
                         print(f"have run out of images, at image number {i}")
                         sys.exit()
                     fpath = join(self.dset_dir,fname)
-                im = load_fpath(fpath,self.is_resize)
+                im = load_fpath(fpath,self.is_resize,downsample)
                 im = im/255
                 if im.ndim == 2:
                     im = np.resize(im,(*(im.shape),1))
@@ -137,5 +139,6 @@ class ImageStreamer():
                     im = im.astype(float)/255
                     im = np.array(Image.fromarray(im).resize((224,224)))
                     im = np.tile(np.expand_dims(im,2),(1,1,3))
+                    im = np.round(im)
                     label = str(self.prepared_dset.targets[i].item())
             yield im, label
