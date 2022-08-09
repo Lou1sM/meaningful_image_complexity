@@ -2,6 +2,7 @@ from scipy.special import softmax
 from time import time
 from scipy.stats import entropy
 from matplotlib.colors import BASE_COLORS
+import matplotlib.cm as cm
 from dl_utils.misc import scatter_clusters
 from dl_utils.tensor_funcs import numpyify, recursive_np_or
 from sklearn.manifold import TSNE
@@ -44,7 +45,7 @@ class ComplexityMeasurer():
         total_num_clusters = 0
         all_single_labels_entropys = []
         all_patch_entropys = []
-        self.get_smallest_increment(x)
+        self.set_smallest_increment(x)
         for layer_being_processed in range(self.num_layers):
             self.layer_being_processed = layer_being_processed
             cluster_start_time = time()
@@ -77,10 +78,11 @@ class ComplexityMeasurer():
             print(f'image time: {time()-img_start_time:.2f}')
         return all_patch_entropys, total_num_clusters, all_single_labels_entropys
 
-    def get_smallest_increment(self,x):
+    def set_smallest_increment(self,x):
         sx = sorted(x.flatten())
         increments = [sx2-sx1 for sx1,sx2 in zip(sx[:-1],sx[1:])]
         self.prec = min([item for item in increments if item != 0])
+        print(self.prec)
 
     def project_clusters(self):
         prev_clabs_as_img = np.expand_dims(self.best_cluster_labels,2)
@@ -103,6 +105,8 @@ class ComplexityMeasurer():
             x = full_x
         assert x.ndim == 2
         N,nz = x.shape
+        print('number pixel-likes to cluster:', N)
+        print('number different pixel-likes:', nz)
         if nz > 50:
             x = PCA(50).fit_transform(x)
         if nz > 3:
@@ -145,18 +149,21 @@ class ComplexityMeasurer():
         if self.subsample != 1:
             self.cluster(full_x,best_nc)
             self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
+        print(f'found {best_nc} clusters')
+        #self.viz_cluster_labels()
         return best_nc, best_dl
 
     def cluster(self,x,nc):
         N = len(x)
         self.model = GMM(nc,n_init=self.n_cluster_inits,covariance_type='diag')
-        try:
-            self.cluster_labels = self.model.fit_predict(x)
-        except ValueError:
-            print(f'failed to cluster with {nc} components, and reg_covar {self.model.reg_covar}')
-            self.model.reg_covar *= 10
-            print(f'trying again with reg_covar {self.model.reg_covar}')
-            self.cluster_labels = self.model.fit_predict(x)
+        while True:
+            try:
+                self.cluster_labels = self.model.fit_predict(x)
+                break
+            except ValueError:
+                print(f'failed to cluster with {nc} components, and reg_covar {self.model.reg_covar}')
+                self.model.reg_covar *= 10
+                print(f'trying again with reg_covar {self.model.reg_covar}')
         found_nc = len(np.unique(self.cluster_labels))
         if nc > 1 and self.display_cluster_imgs:
             scatter_clusters(x,self.best_cluster_labels,show=True)
@@ -169,13 +176,14 @@ class ComplexityMeasurer():
         self.residuals = neg_log_probs * ~self.outliers
         self.len_outliers = self.len_of_outlier * self.outliers
         self.dl_by_dpoint = self.residuals + self.len_outliers + self.idxs_len_per_dpoint + self.model_len/N
+        #self.dl_by_dpoint = self.residuals + self.idxs_len_per_dpoint + self.model_len/N # Tried not counting outliers towards DL
         return found_nc
 
-    def viz_cluster_labels(self,size):
+    def viz_cluster_labels(self):
         nc = len(np.unique(self.best_cluster_labels))
         pallete = PALETTE[:nc]
         coloured_clabs = np.array(pallete)[self.best_cluster_labels]
-        coloured_clabs = np.resize(coloured_clabs,(*size,3))
+        coloured_clabs = np.resize(coloured_clabs,(*self.best_cluster_labels.shape,3))
         plt.imshow(coloured_clabs); plt.show()
 
     def apply_conv_layer(self,x,layer_num='none',custom_cnvl='none'):
@@ -201,11 +209,11 @@ def info_in_patches(patched_im,subsample):
         num_to_subsample = int(len(flattened) * subsample)
         subsample_idxs = np.random.choice(len(flattened),size=num_to_subsample,replace=False)
         to_use = flattened[subsample_idxs]
-    y = list(set([tuple(z) for z in to_use]))
+    #y = list(set([tuple(z) for z in to_use]))
+    y = [tuple(z) for z in np.unique(to_use,axis=0)]
+    print(f'{len(flattened)} labels of {len(y)} distinct values')
     tuples_as_idxs = np.array([y.index(tuple(z)) for z in to_use])
     return labels_entropy(tuples_as_idxs)
-    #bin_counts = np.bincount(
-    #return entropy(bin_counts,base=2)
 
 def labels_entropy(labels: np.array):
     assert labels.ndim == 1
