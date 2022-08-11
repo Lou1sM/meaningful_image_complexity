@@ -144,8 +144,7 @@ class ComplexityMeasurer():
                 print(( f'{nc} {self.dl:.3f}\tMod: {self.model_len:.3f}\t'
                         f'Err: {self.residuals:.3f}\t'
                         f'Idxs: {self.idxs_len:.3f}\t'
-                        f'O: {self.outliers.sum()} {self.len_outliers:.3f}'
-                        f'OI: {self.is_outlier_idxs_len}'))
+                        f'O: {self.outliers.sum()} {self.len_outliers:.3f}\t'))
             if self.dl < best_dl:
                 best_dl = self.dl
                 best_nc = nc
@@ -176,16 +175,14 @@ class ComplexityMeasurer():
         if nc > 1 and self.display_cluster_imgs:
             scatter_clusters(x,self.best_cluster_labels,show=True)
         self.model_len = nc*(self.len_of_each_cluster)
-        # _estimate_log_prob gives log_prob for each cluster, select just the assigned
         new_model_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
         neg_log_probs = new_model_scores * np.log2(np.e)
         self.outliers = neg_log_probs > self.len_of_outlier
+        self.len_outliers = (self.len_of_outlier * self.outliers).sum()
         self.idxs_len_per_cluster = np.log2(N) - np.log2(np.bincount(self.cluster_labels))
         self.idxs_len = self.idxs_len_per_cluster[self.cluster_labels][~self.outliers].sum()
-        self.is_outlier_idxs_len = labels_entropy(self.outliers) * N
         self.residuals = (neg_log_probs * ~self.outliers).sum()
-        self.len_outliers = self.len_of_outlier * (self.outliers).sum()
-        self.dl = self.residuals + self.len_outliers + self.idxs_len + self.model_len + self.is_outlier_idxs_len
+        self.dl = self.residuals + self.len_outliers + self.idxs_len + self.model_len
         return found_nc
 
     def viz_cluster_labels(self):
