@@ -19,7 +19,7 @@ PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
     def __init__(self,verbose,ncs_to_check,n_cluster_inits,print_times,
                     display_cluster_imgs,compare_to_true_entropy,
-                    is_choose_model_per_dpoint,nz,alg_nz,
+                    nz,alg_nz,
                     subsample,patch_comb_method,num_layers,
                     cluster_idxify,info_subsample,**kwargs):
 
@@ -32,7 +32,6 @@ class ComplexityMeasurer():
         self.subsample = subsample
         self.n_cluster_inits = n_cluster_inits
         self.display_cluster_imgs = display_cluster_imgs
-        self.is_choose_model_per_dpoint = is_choose_model_per_dpoint
         self.ncs_to_check = ncs_to_check
         self.nz = nz
         self.alg_nz = alg_nz
@@ -50,6 +49,11 @@ class ComplexityMeasurer():
             self.layer_being_processed = layer_being_processed
             cluster_start_time = time()
             num_clusters_at_this_level, dl = self.mdl_cluster(x)
+            if num_clusters_at_this_level <= 1:
+                pad_len = self.num_layers - len(all_patch_entropys)
+                all_single_labels_entropys += [0]*pad_len
+                all_patch_entropys += [0]*pad_len
+                break
             single_labels_entropy = labels_entropy(self.best_cluster_labels.flatten())
             if self.print_times:
                 print(f'mdl_cluster time: {time()-cluster_start_time:.2f}')
@@ -59,15 +63,17 @@ class ComplexityMeasurer():
                             for c in np.unique(self.best_cluster_labels)]
             one_hot_im = np.stack(bool_ims_by_c,axis=2)
             patch_size = 4*(2**layer_being_processed)
+            if self.verbose:
+                print(f'patch_size: {patch_size}')
             c_idx_patches = combine_patches(one_hot_im,patch_size,self.patch_comb_method)
             if self.cluster_idxify:
                 x = c_idx_patches
             else:
                 x = combine_patches(x,patch_size,self.patch_comb_method)
             info_start_time = time()
-            patch_entropy = info_in_patches(c_idx_patches,self.info_subsample)
+            patch_entropy = self.info_in_patches(c_idx_patches,self.info_subsample)
             if self.info_subsample != 1 and self.compare_to_true_entropy:
-                true_entropy = info_in_patches(c_idx_patches,1)
+                true_entropy = self.info_in_patches(c_idx_patches,1)
                 print(f'true entropy: {true_entropy}, '
                         f'approx at {self.info_subsample}: {patch_entropy}')
             if self.print_times:
@@ -105,8 +111,9 @@ class ComplexityMeasurer():
             x = full_x
         assert x.ndim == 2
         N,nz = x.shape
-        print('number pixel-likes to cluster:', N)
-        print('number different pixel-likes:', nz)
+        if self.verbose:
+            print('number pixel-likes to cluster:', N)
+            print('number different pixel-likes:', nz)
         if nz > 50:
             x = PCA(50).fit_transform(x)
         if nz > 3:
@@ -124,8 +131,8 @@ class ComplexityMeasurer():
         data_range = x.max() - x.min()
         self.len_of_each_cluster = 2 * nz * (np.log2(data_range) + 32) # Float precision
         self.len_of_outlier = nz * np.log2(data_range)
-        best_dl = np.inf
-        best_nc = -1
+        best_dl = N*self.len_of_outlier # Could call everything an outlier and have no clusters
+        best_nc = 0
         nc_start_times = []
         ncs_to_check = [5] if self.is_mdl_abl else range(1,self.ncs_to_check+1)
         for nc in ncs_to_check:
@@ -134,12 +141,13 @@ class ComplexityMeasurer():
             if found_nc == nc-1:
                 print(f"only found {nc-1} clusters when looking for {nc}, terminating here"); break
             if self.verbose:
-                print(( f'{nc} {self.dl_by_dpoint.sum():.3f}\tMod: {self.model_len:.3f}\t'
-                        f'Err: {self.residuals.sum():.3f}\t'
-                        f'Idxs: {self.idxs_len_per_dpoint.sum():.3f}\t'
-                        f'O: {self.outliers.sum()} {self.len_outliers.sum():.3f}'))
-            if self.dl_by_dpoint.sum() < best_dl:
-                best_dl = self.dl_by_dpoint.sum()
+                print(( f'{nc} {self.dl:.3f}\tMod: {self.model_len:.3f}\t'
+                        f'Err: {self.residuals:.3f}\t'
+                        f'Idxs: {self.idxs_len:.3f}\t'
+                        f'O: {self.outliers.sum()} {self.len_outliers:.3f}'
+                        f'OI: {self.is_outlier_idxs_len}'))
+            if self.dl < best_dl:
+                best_dl = self.dl
                 best_nc = nc
                 self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
         if self.print_times:
@@ -149,7 +157,7 @@ class ComplexityMeasurer():
         if self.subsample != 1:
             self.cluster(full_x,best_nc)
             self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
-        print(f'found {best_nc} clusters')
+        if self.verbose: print(f'found {best_nc} clusters')
         #self.viz_cluster_labels()
         return best_nc, best_dl
 
@@ -168,15 +176,16 @@ class ComplexityMeasurer():
         if nc > 1 and self.display_cluster_imgs:
             scatter_clusters(x,self.best_cluster_labels,show=True)
         self.model_len = nc*(self.len_of_each_cluster)
-        self.idxs_len_per_cluster = np.log2(N) - np.log2(np.bincount(self.cluster_labels))
-        self.idxs_len_per_dpoint = self.idxs_len_per_cluster[self.cluster_labels]
+        # _estimate_log_prob gives log_prob for each cluster, select just the assigned
         new_model_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
         neg_log_probs = new_model_scores * np.log2(np.e)
         self.outliers = neg_log_probs > self.len_of_outlier
-        self.residuals = neg_log_probs * ~self.outliers
-        self.len_outliers = self.len_of_outlier * self.outliers
-        self.dl_by_dpoint = self.residuals + self.len_outliers + self.idxs_len_per_dpoint + self.model_len/N
-        #self.dl_by_dpoint = self.residuals + self.idxs_len_per_dpoint + self.model_len/N # Tried not counting outliers towards DL
+        self.idxs_len_per_cluster = np.log2(N) - np.log2(np.bincount(self.cluster_labels))
+        self.idxs_len = self.idxs_len_per_cluster[self.cluster_labels][~self.outliers].sum()
+        self.is_outlier_idxs_len = labels_entropy(self.outliers) * N
+        self.residuals = (neg_log_probs * ~self.outliers).sum()
+        self.len_outliers = self.len_of_outlier * (self.outliers).sum()
+        self.dl = self.residuals + self.len_outliers + self.idxs_len + self.model_len + self.is_outlier_idxs_len
         return found_nc
 
     def viz_cluster_labels(self):
@@ -199,21 +208,21 @@ class ComplexityMeasurer():
             print(e)
             breakpoint()
 
-def info_in_patches(patched_im,subsample):
-    assert patched_im.ndim == 3
-    nc = patched_im.shape[2]
-    flattened = patched_im.reshape(-1,nc)
-    if subsample == 1:
-        to_use = flattened
-    else:
-        num_to_subsample = int(len(flattened) * subsample)
-        subsample_idxs = np.random.choice(len(flattened),size=num_to_subsample,replace=False)
-        to_use = flattened[subsample_idxs]
-    #y = list(set([tuple(z) for z in to_use]))
-    y = [tuple(z) for z in np.unique(to_use,axis=0)]
-    print(f'{len(flattened)} labels of {len(y)} distinct values')
-    tuples_as_idxs = np.array([y.index(tuple(z)) for z in to_use])
-    return labels_entropy(tuples_as_idxs)
+    def info_in_patches(self,patched_im,subsample):
+        assert patched_im.ndim == 3
+        nc = patched_im.shape[2]
+        flattened = patched_im.reshape(-1,nc)
+        if subsample == 1:
+            to_use = flattened
+        else:
+            num_to_subsample = int(len(flattened) * subsample)
+            subsample_idxs = np.random.choice(len(flattened),size=num_to_subsample,replace=False)
+            to_use = flattened[subsample_idxs]
+        y = [tuple(z) for z in np.unique(to_use,axis=0)]
+        if self.verbose:
+            print(f'{len(flattened)} labels of {len(y)} distinct values')
+        tuples_as_idxs = np.array([y.index(tuple(z)) for z in to_use])
+        return labels_entropy(tuples_as_idxs)
 
 def labels_entropy(labels: np.array):
     assert labels.ndim == 1

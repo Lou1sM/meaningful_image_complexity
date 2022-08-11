@@ -139,7 +139,7 @@ with open(join(exp_dir,f'{ARGS.dset}_ARGS.txt'),'w') as f:
 if ARGS.show_df:
     print(df_for_this_dset)
     print(alls_df)
-mean_single_labels_entropy = np.array(all_single_labels_entropys).mean(axis=0)
-mean_patch_entropys = np.array(all_patch_entropys).mean(axis=0)
+mean_single_labels_entropy = np.stack(all_single_labels_entropys).mean(axis=0)
+mean_patch_entropys = np.stack(all_patch_entropys).mean(axis=0)
 print(*[f'{m:.3f}' for m in mean_single_labels_entropy], f'total:{mean_single_labels_entropy.sum():.3f}')
 print(*[f'{pe:.3f}' for pe in mean_patch_entropys], f'total:{mean_patch_entropys.sum():.3f}')
