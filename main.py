@@ -1,5 +1,6 @@
 import argparse
 from utils import append_or_add_key, results_dict_to_df, make_alls_df
+import pandas as pd
 from time import time
 import numpy as np
 from mdl_conv import ComplexityMeasurer
@@ -57,16 +58,18 @@ all_patch_entropys = []
 comp_meas_kwargs = ARGS.__dict__
 comp_meas = ComplexityMeasurer(**comp_meas_kwargs)
 single_labels_entropy_by_class = {}
-methods = ['no_patch','no_mdl','glcm','fract','ent','ncs','jpg','mach','khan','redies','patch_ent']
-methods += [f'patch_ent{i}' for i in range(ARGS.num_layers)]
-results_dict = {m:{} for m in methods}
+methods = ['img_label','proc_time','patch_ent','no_patch','ncs'] + [f'patch_ent{i}' for i in range(ARGS.num_layers)]
+if ARGS.run_other_methods:
+    methods += ['glcm','no_mdl','fract','ent','jpg','mach','khan','redies']
+results_df = pd.DataFrame(columns=methods,index=list(range(ARGS.num_ims))+['stds','means'])
 
 img_start_times = []
 img_times_real = []
 labels = []
 img_streamer = ImageStreamer(ARGS.dset,~ARGS.no_resize)
 for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.downsample,ARGS.given_fname,ARGS.given_class_dir)):
-    print(idx, label)
+    img_label = label.split('_')[0] if ARGS.dset in ['im','dtd'] else label
+    print(idx, img_label)
     plt.axis('off')
     plt.imshow(im); plt.savefig('image_just_used.png')
     if ARGS.gaussian_noisify > 0:
@@ -84,64 +87,36 @@ for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.dow
         comp_meas.is_mdl_abl = False
     else:
         no_mdls = [0]
-    img_start_time_real = time()
+    img_start_time = time()
     comp_meas.is_mdl_abl = False
     new_patch_entropys, ncs, new_single_labels_entropys = comp_meas.interpret(im)
-    img_times_real.append(time()-img_start_time_real)
-
-    results_dict_for_this_im = {}
-    results_dict_for_this_im['no_patch'] = sum(new_single_labels_entropys)
-    results_dict_for_this_im['patch_ent'] = sum(new_patch_entropys)
-    results_dict_for_this_im['ncs'] = ncs
-    #if ARGS.run_other_methods:
-    comp_meas.is_mdl_abl = True
-    no_mdls, _, _ = comp_meas.interpret(im)
+    results_df.loc[idx,'img_label'] = img_label
+    results_df.loc[idx,'proc_time'] = time()-img_start_time
+    results_df.loc[idx,'patch_ent'] = sum(new_patch_entropys)
     for i,pe in enumerate(new_patch_entropys):
-        results_dict_for_this_im[f'patch_ent{i}'] = pe
-    results_dict_for_this_im['no_mdl'] = sum(no_mdls)
-    greyscale_im = rgb2gray(im)
-    results_dict_for_this_im['fract'] = compute_fractal_dimension(greyscale_im)
-    im_unint8 = (greyscale_im*255).astype(np.uint8)
-    results_dict_for_this_im['glcm'] = glcm_entropy(im_unint8)
-    results_dict_for_this_im['ent'] = shannon_entropy(im_unint8)
-    all_single_labels_entropys.append(new_single_labels_entropys)
-    all_patch_entropys.append(new_patch_entropys)
-    results_dict_for_this_im['jpg'] = jpg_compression_ratio(im)
-    results_dict_for_this_im['mach'] = machado2015(im)
-    results_dict_for_this_im['khan'] = khan2021(im)
-    results_dict_for_this_im['redies'] = redies2012(im)
-    label_for_df = label.split('_')[0] if ARGS.dset in ['im','dtd'] else label
-    for m,r in results_dict_for_this_im.items():
-        append_or_add_key(results_dict[m],label_for_df,r)
-        append_or_add_key(results_dict[m],'all',r)
+        results_df.loc[idx,f'patch_ent{i}'] = pe
+    results_df.loc[idx,'no_patch'] = sum(new_single_labels_entropys)
+    results_df.loc[idx,'ncs'] = ncs
+    if ARGS.run_other_methods:
+        comp_meas.is_mdl_abl = True
+        no_mdls, _, _ = comp_meas.interpret(im)
+        results_df.loc[idx,'no_mdl'] = sum(no_mdls)
+        greyscale_im = rgb2gray(im)
+        results_df.loc[idx,'fract'] = compute_fractal_dimension(greyscale_im)
+        im_unint8 = (greyscale_im*255).astype(np.uint8)
+        results_df.loc[idx,'glcm'] = glcm_entropy(im_unint8)
+        results_df.loc[idx,'ent'] = shannon_entropy(im_unint8)
+        all_single_labels_entropys.append(new_single_labels_entropys)
+        all_patch_entropys.append(new_patch_entropys)
+        results_df.loc[idx,'jpg'] = jpg_compression_ratio(im)
+        results_df.loc[idx,'mach'] = machado2015(im)
+        results_df.loc[idx,'khan'] = khan2021(im)
+        results_df.loc[idx,'redies'] = redies2012(im)
     labels.append(label)
 
-img_start_times.append(time())
-img_times = [img_start_times[i+1] - imgs for i,imgs in enumerate(img_start_times[:-1])]
-avg_img_time = (img_start_times[-1] - img_start_times[0])/ARGS.num_ims
-avg_img_time_real = np.array(img_times_real).mean()
-print(f'Avg time per image: {avg_img_time}')
-print(f'Avg time per image real: {avg_img_time_real}')
-
-
-mean_var_results = {method_k:{class_k:{'mean':np.array(v).mean(),'var':np.array(v).mean()}
-                    for class_k,v in method_v.items()}
-                    for method_k,method_v in results_dict.items()}
-df_for_this_dset = results_dict_to_df(results_dict)
-alls_df = make_alls_df(df_for_this_dset)
-df_for_this_dset.to_csv(join(exp_dir,f'{ARGS.dset}_results_by_class.csv'),index=True)
-alls_df.to_csv(join(exp_dir,f'{ARGS.dset}_results.csv'),index=True)
-with open(join(exp_dir,f'{ARGS.dset}_ims_used.txt'),'w') as f:
-    for lab in labels:
-        f.write(lab + '\n')
-with open(join(exp_dir,f'{ARGS.dset}_ARGS.txt'),'w') as f:
-    for a in dir(ARGS):
-        if not a.startswith('_'):
-           f.write(f'{a}: {getattr(ARGS,a)}'+ '\n')
-if ARGS.show_df:
-    print(df_for_this_dset)
-    print(alls_df)
-mean_single_labels_entropy = np.stack(all_single_labels_entropys).mean(axis=0)
-mean_patch_entropys = np.stack(all_patch_entropys).mean(axis=0)
-print(*[f'{m:.3f}' for m in mean_single_labels_entropy], f'total:{mean_single_labels_entropy.sum():.3f}')
-print(*[f'{pe:.3f}' for pe in mean_patch_entropys], f'total:{mean_patch_entropys.sum():.3f}')
+stds = results_df.std(axis=0)
+means = results_df.mean(axis=0)
+results_df.loc['stds'] = stds
+results_df.loc['means'] = means
+results_df.to_csv(join(exp_dir,f'{ARGS.dset}_results.csv'))
+print(results_df.loc['means'].drop('img_label'))

@@ -131,7 +131,6 @@ class ComplexityMeasurer():
             x = dim_reducer.fit_transform(x)
             if self.print_times:
                 print(f'dim red time: {time()-dim_red_start_time:.2f}')
-        #x = x[:,:1]
         N,nz = x.shape
         data_range = x.max() - x.min()
         self.len_of_each_cluster = 2 * nz * (np.log2(data_range) + 32) # Float precision
