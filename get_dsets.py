@@ -1,12 +1,12 @@
 import numpy as np
 import pickle
 from dl_utils.tensor_funcs import numpyify
-#import torchvision
 from create_simple_imgs import create_simple_img
 import sys
 from PIL import Image
 from os import listdir
 from os.path import join
+import struct
 
 
 imagenette_synset_dict = {
@@ -88,7 +88,15 @@ class ImageStreamer():
                 labels = d[b'labels']
                 self.prepared_dset = list(zip(imgs,labels))
         elif dset == 'mnist':
-            self.prepared_dset = torchvision.datasets.MNIST(root='~/datasets',train=False,download=True)
+            with open('mnist_data/t10k-images-idx3-ubyte','rb') as f:
+                magic, size = struct.unpack(">II", f.read(8))
+                nrows, ncols = struct.unpack(">II", f.read(8))
+                imgs = np.fromfile(f, dtype=np.dtype(np.uint8).newbyteorder('>'))
+                imgs = imgs.reshape((size, nrows, ncols))
+            with open('mnist_data/t10k-labels-idx1-ubyte','rb') as f:
+                magic, size = struct.unpack(">II", f.read(8))
+                labels = np.fromfile(f, dtype=np.dtype(np.uint8).newbyteorder('>'))
+            self.prepared_dset = list(zip(imgs,labels))
         elif dset == 'rand':
             self.prepared_dset = np.random.rand(1000,224,224,3)
         elif dset == 'stripes':
@@ -142,15 +150,13 @@ class ImageStreamer():
                 fpath = join('fractal_imgs',fname)
                 im = load_fpath(fpath,self.is_resize,downsample)
                 label = 'fract_dim' + fname.split('.')[0][-1]
+            elif self.dset in ['cifar']:
+                im,label = self.prepared_dset[i]
+                im = np.array(Image.fromarray(im).resize((224,224)))/255
+            elif self.dset == 'mnist':
+                im,label = self.prepared_dset[i]
+                im = np.array(Image.fromarray(im).resize((224,224)))
+                im = np.tile(np.expand_dims(im,2),(1,1,3))
             else:
-                if self.dset == 'cifar':
-                    im,label = self.prepared_dset[i]
-                    im = np.array(Image.fromarray(im).resize((224,224)))/255
-                elif self.dset == 'mnist':
-                    im = numpyify(self.prepared_dset.data[i])
-                    im = im.astype(float)/255
-                    im = np.array(Image.fromarray(im).resize((224,224)))
-                    im = np.tile(np.expand_dims(im,2),(1,1,3))
-                    im = np.round(im)
-                    label = str(self.prepared_dset.targets[i].item())
+                print("INVALID DSET NAME:", self.dset)
             yield im, label
