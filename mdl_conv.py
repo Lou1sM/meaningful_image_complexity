@@ -18,8 +18,8 @@ from umap import UMAP
 PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
     def __init__(self,verbose,ncs_to_check,n_cluster_inits,print_times,
-                    display_cluster_imgs,compare_to_true_entropy,
-                    nz,alg_nz,
+                    display_cluster_label_imgs,compare_to_true_entropy,
+                    nz,alg_nz,display_scattered_clusters,
                     subsample,patch_comb_method,num_layers,
                     cluster_idxify,info_subsample,**kwargs):
 
@@ -31,7 +31,8 @@ class ComplexityMeasurer():
         self.patch_comb_method = patch_comb_method
         self.subsample = subsample
         self.n_cluster_inits = n_cluster_inits
-        self.display_cluster_imgs = display_cluster_imgs
+        self.display_cluster_label_imgs = display_cluster_label_imgs
+        self.display_scattered_clusters = display_scattered_clusters
         self.ncs_to_check = ncs_to_check
         self.nz = nz
         self.alg_nz = alg_nz
@@ -49,6 +50,8 @@ class ComplexityMeasurer():
             self.layer_being_processed = layer_being_processed
             cluster_start_time = time()
             num_clusters_at_this_level, dl = self.mdl_cluster(x)
+            if self.display_cluster_label_imgs:
+                self.viz_cluster_labels()
             if num_clusters_at_this_level <= 1:
                 pad_len = self.num_layers - len(all_patch_entropys)
                 all_single_labels_entropys += [0]*pad_len
@@ -124,9 +127,11 @@ class ComplexityMeasurer():
             elif self.alg_nz == 'tsne':
                 dim_reducer = TSNE(n_components=self.nz, learning_rate='auto',init='pca')
             dim_red_start_time = time()
-            x = dim_reducer.fit_transform(x).squeeze()
+            #x = dim_reducer.fit_transform(x).squeeze()
+            x = dim_reducer.fit_transform(x)
             if self.print_times:
                 print(f'dim red time: {time()-dim_red_start_time:.2f}')
+        #x = x[:,:1]
         N,nz = x.shape
         data_range = x.max() - x.min()
         self.len_of_each_cluster = 2 * nz * (np.log2(data_range) + 32) # Float precision
@@ -141,10 +146,10 @@ class ComplexityMeasurer():
             if found_nc == nc-1:
                 print(f"only found {nc-1} clusters when looking for {nc}, terminating here"); break
             if self.verbose:
-                print(( f'{nc} {self.dl:.3f}\tMod: {self.model_len:.3f}\t'
-                        f'Err: {self.residuals:.3f}\t'
-                        f'Idxs: {self.idxs_len:.3f}\t'
-                        f'O: {self.outliers.sum()} {self.len_outliers:.3f}\t'))
+                print(( f'{nc} {self.dl/N:.3f}\tMod: {self.model_len/N:.3f}\t'
+                        f'Err: {self.residuals/N:.3f}\t'
+                        f'Idxs: {self.idxs_len/N:.3f}\t'
+                        f'O: {self.outliers.sum()} {self.len_outliers/N:.3f}\t'))
             if self.dl < best_dl:
                 best_dl = self.dl
                 best_nc = nc
@@ -157,7 +162,6 @@ class ComplexityMeasurer():
             self.cluster(full_x,best_nc)
             self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
         if self.verbose: print(f'found {best_nc} clusters')
-        #self.viz_cluster_labels()
         return best_nc, best_dl
 
     def cluster(self,x,nc):
@@ -172,8 +176,8 @@ class ComplexityMeasurer():
                 self.model.reg_covar *= 10
                 print(f'trying again with reg_covar {self.model.reg_covar}')
         found_nc = len(np.unique(self.cluster_labels))
-        if nc > 1 and self.display_cluster_imgs:
-            scatter_clusters(x,self.best_cluster_labels,show=True)
+        if nc > 1 and self.display_scattered_clusters:
+            scatter_clusters(x,self.best_cluster_labels.flatten(),show=True)
         self.model_len = nc*(self.len_of_each_cluster)
         new_model_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
         neg_log_probs = new_model_scores * np.log2(np.e)

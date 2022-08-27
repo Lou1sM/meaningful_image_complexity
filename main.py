@@ -16,8 +16,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--alg_nz',type=str,choices=['pca','umap','tsne'],default='pca')
 parser.add_argument('--cluster_idxify',action='store_true')
 parser.add_argument('--compare_to_true_entropy',action='store_true')
-parser.add_argument('--display_cluster_imgs',action='store_true')
-parser.add_argument('-d','--dset',type=str,choices=['im','cifar','mnist','rand','dtd','stripes','halves'],default='stripes')
+parser.add_argument('--display_cluster_label_imgs',action='store_true')
+parser.add_argument('--display_input_imgs',action='store_true')
+parser.add_argument('--display_scattered_clusters',action='store_true')
+parser.add_argument('-d','--dset',type=str,choices=['im','cifar','mnist','rand','dtd','stripes','halves','fractal_imgs'],default='stripes')
 parser.add_argument('--downsample',type=int,default=-1)
 parser.add_argument('--exp_name',type=str,default='jim')
 parser.add_argument('--given_fname',type=str,default='none')
@@ -36,6 +38,7 @@ parser.add_argument('--overwrite',action='store_true')
 parser.add_argument('--patch_comb_method',type=str,choices=['sum','concat','or'],default='sum')
 parser.add_argument('--print_times',action='store_true')
 parser.add_argument('--rand_dpoint',action='store_true')
+parser.add_argument('--run_other_methods',action='store_true')
 parser.add_argument('--show_df',action='store_true')
 parser.add_argument('--subsample',type=float,default=1)
 parser.add_argument('--verbose','-v',action='store_true')
@@ -65,16 +68,14 @@ img_streamer = ImageStreamer(ARGS.dset,~ARGS.no_resize)
 for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.downsample,ARGS.given_fname,ARGS.given_class_dir)):
     print(idx, label)
     plt.axis('off')
-    #plt.imshow(im); plt.show()
     plt.imshow(im); plt.savefig('image_just_used.png')
-    #im = np.round(im)
     if ARGS.gaussian_noisify > 0:
         noise = np.random.randn(*im.shape)
         im += ARGS.gaussian_noisify*noise
         im = np.clip(im,0,1)
 
     img_start_times.append(time())
-    if ARGS.display_cluster_imgs:
+    if ARGS.display_input_imgs:
         plt.imshow(im);plt.show()
     im_normed = im
     if ARGS.include_mdl_abl:
@@ -84,19 +85,20 @@ for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.dow
     else:
         no_mdls = [0]
     img_start_time_real = time()
-    comp_meas.is_mdl_abl = True
-    #no_mdls, _, _ = comp_meas.interpret(im)
     comp_meas.is_mdl_abl = False
     new_patch_entropys, ncs, new_single_labels_entropys = comp_meas.interpret(im)
     img_times_real.append(time()-img_start_time_real)
 
     results_dict_for_this_im = {}
-    for i,pe in enumerate(new_patch_entropys):
-        results_dict_for_this_im[f'patch_ent{i}'] = pe
     results_dict_for_this_im['no_patch'] = sum(new_single_labels_entropys)
-    results_dict_for_this_im['no_mdl'] = sum(no_mdls)
     results_dict_for_this_im['patch_ent'] = sum(new_patch_entropys)
     results_dict_for_this_im['ncs'] = ncs
+    #if ARGS.run_other_methods:
+    comp_meas.is_mdl_abl = True
+    no_mdls, _, _ = comp_meas.interpret(im)
+    for i,pe in enumerate(new_patch_entropys):
+        results_dict_for_this_im[f'patch_ent{i}'] = pe
+    results_dict_for_this_im['no_mdl'] = sum(no_mdls)
     greyscale_im = rgb2gray(im)
     results_dict_for_this_im['fract'] = compute_fractal_dimension(greyscale_im)
     im_unint8 = (greyscale_im*255).astype(np.uint8)

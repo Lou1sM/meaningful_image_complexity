@@ -88,12 +88,14 @@ class ImageStreamer():
         elif dset == 'stripes':
             self.line_thicknesses = np.random.permutation(np.arange(3,10))
 
-
     def stream_images(self,num_ims,downsample,given_fname='none',given_class_dir='none'):
         if self.dset in ['cifar','mnist','usps']:
             indices = np.random.choice(len(self.prepared_dset),size=num_ims,replace=False)
         elif self.dset == 'dtd':
             n = min(len(listdir('dtd/suitable')),num_ims)
+            indices = range(n)
+        elif self.dset == 'fractal_imgs':
+            n = min(len(listdir('fractal_imgs')),num_ims)
             indices = range(n)
         else: indices = range(num_ims)
 
@@ -129,6 +131,11 @@ class ImageStreamer():
             elif self.dset == 'rand':
                 im = self.prepared_dset[i]
                 label = 'rand'
+            elif self.dset == 'fractal_imgs':
+                fname = listdir('fractal_imgs')[i]
+                fpath = join('fractal_imgs',fname)
+                im = load_fpath(fpath,self.is_resize,downsample)
+                label = 'fract_dim' + fname.split('.')[0][-1]
             else:
                 if self.dset == 'cifar':
                     im = self.prepared_dset.data[i]
