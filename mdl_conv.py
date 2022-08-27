@@ -12,7 +12,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-from umap import UMAP
 
 
 PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
@@ -91,7 +90,7 @@ class ComplexityMeasurer():
         sx = sorted(x.flatten())
         increments = [sx2-sx1 for sx1,sx2 in zip(sx[:-1],sx[1:])]
         self.prec = min([item for item in increments if item != 0])
-        print(self.prec)
+        print(f'Setting set_smallest_increment to {self.prec}')
 
     def project_clusters(self):
         prev_clabs_as_img = np.expand_dims(self.best_cluster_labels,2)
@@ -120,15 +119,8 @@ class ComplexityMeasurer():
         if nz > 50:
             x = PCA(50).fit_transform(x)
         if nz > 3:
-            if self.alg_nz == 'pca':
-                dim_reducer = PCA(self.nz)
-            elif self.alg_nz == 'umap':
-                dim_reducer = UMAP(n_components=self.nz,min_dist=0,n_neighbors=50)
-            elif self.alg_nz == 'tsne':
-                dim_reducer = TSNE(n_components=self.nz, learning_rate='auto',init='pca')
             dim_red_start_time = time()
-            #x = dim_reducer.fit_transform(x).squeeze()
-            x = dim_reducer.fit_transform(x)
+            x = PCA(self.nz).fit_transform(x)
             if self.print_times:
                 print(f'dim red time: {time()-dim_red_start_time:.2f}')
         N,nz = x.shape

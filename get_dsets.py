@@ -1,6 +1,7 @@
 import numpy as np
+import pickle
 from dl_utils.tensor_funcs import numpyify
-import torchvision
+#import torchvision
 from create_simple_imgs import create_simple_img
 import sys
 from PIL import Image
@@ -80,7 +81,12 @@ class ImageStreamer():
         elif dset=='dtd':
             self.dset_dir = 'dtd/suitable'
         elif dset == 'cifar':
-            self.prepared_dset = torchvision.datasets.CIFAR10(root='~/datasets',download=True,train=True)
+            with open('cifar-10-batches-py/data_batch_1', 'rb') as f:
+                d = pickle.load(f, encoding='bytes')
+                imgs = d[b'data']
+                imgs = np.transpose(imgs.reshape((-1,3,32,32)),(0,2,3,1))
+                labels = d[b'labels']
+                self.prepared_dset = list(zip(imgs,labels))
         elif dset == 'mnist':
             self.prepared_dset = torchvision.datasets.MNIST(root='~/datasets',train=False,download=True)
         elif dset == 'rand':
@@ -138,9 +144,8 @@ class ImageStreamer():
                 label = 'fract_dim' + fname.split('.')[0][-1]
             else:
                 if self.dset == 'cifar':
-                    im = self.prepared_dset.data[i]
+                    im,label = self.prepared_dset[i]
                     im = np.array(Image.fromarray(im).resize((224,224)))/255
-                    label = str(self.prepared_dset.targets[i])
                 elif self.dset == 'mnist':
                     im = numpyify(self.prepared_dset.data[i])
                     im = im.astype(float)/255
