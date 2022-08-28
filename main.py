@@ -53,14 +53,12 @@ if (isfile(join(exp_dir,f'{ARGS.dset}_results.csv')) and
         print('aborting')
         sys.exit()
 check_dir(exp_dir)
-all_single_labels_entropys = []
-all_patch_entropys = []
 comp_meas_kwargs = ARGS.__dict__
 comp_meas = ComplexityMeasurer(**comp_meas_kwargs)
 single_labels_entropy_by_class = {}
-methods = ['img_label','proc_time','patch_ent','no_patch','ncs'] + [f'patch_ent{i}' for i in range(ARGS.num_layers)]
+methods = ['img_label','proc_time','total'] + [f'level{i}' for i in range(ARGS.num_layers)]
 if ARGS.run_other_methods:
-    methods += ['glcm','no_mdl','fract','ent','jpg','mach','khan','redies']
+    methods += ['glcm','no_mdl','fract','ent','jpg','mach','khan','redies','no_patch']
 results_df = pd.DataFrame(columns=methods,index=list(range(ARGS.num_ims))+['stds','means'])
 
 img_start_times = []
@@ -89,25 +87,22 @@ for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.dow
         no_mdls = [0]
     img_start_time = time()
     comp_meas.is_mdl_abl = False
-    new_patch_entropys, ncs, new_single_labels_entropys = comp_meas.interpret(im)
+    scores_at_each_level, ncs, new_single_labels_entropys = comp_meas.interpret(im)
     results_df.loc[idx,'img_label'] = img_label
     results_df.loc[idx,'proc_time'] = time()-img_start_time
-    results_df.loc[idx,'patch_ent'] = sum(new_patch_entropys)
-    for i,pe in enumerate(new_patch_entropys):
-        results_df.loc[idx,f'patch_ent{i}'] = pe
-    results_df.loc[idx,'no_patch'] = sum(new_single_labels_entropys)
-    results_df.loc[idx,'ncs'] = ncs
+    results_df.loc[idx,'total'] = sum(scores_at_each_level)
+    for i,pe in enumerate(scores_at_each_level):
+        results_df.loc[idx,f'level{i}'] = pe
     if ARGS.run_other_methods:
         comp_meas.is_mdl_abl = True
         no_mdls, _, _ = comp_meas.interpret(im)
         results_df.loc[idx,'no_mdl'] = sum(no_mdls)
+        results_df.loc[idx,'no_patch'] = sum(new_single_labels_entropys)
         greyscale_im = rgb2gray(im)
         results_df.loc[idx,'fract'] = compute_fractal_dimension(greyscale_im)
         im_unint8 = (greyscale_im*255).astype(np.uint8)
         results_df.loc[idx,'glcm'] = glcm_entropy(im_unint8)
         results_df.loc[idx,'ent'] = shannon_entropy(im_unint8)
-        all_single_labels_entropys.append(new_single_labels_entropys)
-        all_patch_entropys.append(new_patch_entropys)
         results_df.loc[idx,'jpg'] = jpg_compression_ratio(im)
         results_df.loc[idx,'mach'] = machado2015(im)
         results_df.loc[idx,'khan'] = khan2021(im)
@@ -119,4 +114,10 @@ means = results_df.mean(axis=0)
 results_df.loc['stds'] = stds
 results_df.loc['means'] = means
 results_df.to_csv(join(exp_dir,f'{ARGS.dset}_results.csv'))
+with open(join(exp_dir,f'{ARGS.dset}_ARGS.txt'),'w') as f:
+    for a in dir(ARGS):
+        if not a.startswith('_'):
+           f.write(f'{a}: {getattr(ARGS,a)}'+ '\n')
+if ARGS.show_df:
+    print(results_df)
 print(results_df.loc['means'].drop('img_label'))
