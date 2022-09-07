@@ -20,12 +20,12 @@ class ComplexityMeasurer():
                     display_cluster_label_imgs,compare_to_true_entropy,
                     nz,alg_nz,display_scattered_clusters,
                     subsample,patch_comb_method,num_layers,
-                    cluster_idxify,info_subsample,**kwargs):
+                    no_cluster_idxify,info_subsample,**kwargs):
 
         self.verbose = verbose
         self.num_layers = num_layers
         self.print_times = print_times
-        self.cluster_idxify = cluster_idxify
+        self.cluster_idxify = not no_cluster_idxify
         self.compare_to_true_entropy = compare_to_true_entropy
         self.patch_comb_method = patch_comb_method
         self.subsample = subsample
@@ -42,7 +42,7 @@ class ComplexityMeasurer():
         img_start_time = time()
         x = np.copy(given_x)
         total_num_clusters = 0
-        all_single_labels_entropys = []
+        all_single_labels_ass_idxs = []
         all_patch_entropys = []
         self.set_smallest_increment(x)
         for layer_being_processed in range(self.num_layers):
@@ -53,14 +53,15 @@ class ComplexityMeasurer():
                 self.viz_cluster_labels()
             if num_clusters_at_this_level <= 1:
                 pad_len = self.num_layers - len(all_patch_entropys)
-                all_single_labels_entropys += [0]*pad_len
+                all_single_labels_ass_idxs += [0]*pad_len
                 all_patch_entropys += [0]*pad_len
                 break
-            single_labels_entropy = labels_entropy(self.best_cluster_labels.flatten())
+            #single_labels_ass_idx = labels_entropy(self.best_cluster_labels.flatten())
+            single_labels_ass_idx = labels_ass_idx(self.best_cluster_labels.flatten())
             if self.print_times:
                 print(f'mdl_cluster time: {time()-cluster_start_time:.2f}')
             total_num_clusters += num_clusters_at_this_level
-            all_single_labels_entropys.append(single_labels_entropy)
+            all_single_labels_ass_idxs.append(single_labels_ass_idx)
             bool_ims_by_c = [(self.best_cluster_labels==c)
                             for c in np.unique(self.best_cluster_labels)]
             one_hot_im = np.stack(bool_ims_by_c,axis=2)
@@ -81,10 +82,10 @@ class ComplexityMeasurer():
             if self.print_times:
                 print(f'time to compute entropy: {time()-info_start_time:.2f}')
             all_patch_entropys.append(patch_entropy)
-            print(f'{layer_being_processed}: single ent: {single_labels_entropy}, patch_ent: {patch_entropy}')
+            print(f'{layer_being_processed}: single ent: {single_labels_ass_idx}, patch_ent: {patch_entropy}')
         if self.print_times:
             print(f'image time: {time()-img_start_time:.2f}')
-        return all_patch_entropys, total_num_clusters, all_single_labels_entropys
+        return all_patch_entropys, total_num_clusters, all_single_labels_ass_idxs
 
     def set_smallest_increment(self,x):
         sx = sorted(x.flatten())
@@ -214,7 +215,12 @@ class ComplexityMeasurer():
         if self.verbose:
             print(f'{len(flattened)} labels of {len(y)} distinct values')
         tuples_as_idxs = np.array([y.index(tuple(z)) for z in to_use])
-        return labels_entropy(tuples_as_idxs)
+        return labels_ass_idx(tuples_as_idxs)
+
+def labels_ass_idx(labels: np.array):
+    assert labels.ndim == 1
+    bin_counts = np.bincount(labels.flatten())
+    return np.log(bin_counts).sum() / bin_counts.sum()
 
 def labels_entropy(labels: np.array):
     assert labels.ndim == 1

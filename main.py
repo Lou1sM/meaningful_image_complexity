@@ -15,7 +15,7 @@ from skimage.measure import shannon_entropy
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--alg_nz',type=str,choices=['pca','umap','tsne'],default='pca')
-parser.add_argument('--cluster_idxify',action='store_true')
+parser.add_argument('--no_cluster_idxify',action='store_true')
 parser.add_argument('--compare_to_true_entropy',action='store_true')
 parser.add_argument('--display_cluster_label_imgs',action='store_true')
 parser.add_argument('--display_input_imgs',action='store_true')
@@ -56,7 +56,7 @@ check_dir(exp_dir)
 comp_meas_kwargs = ARGS.__dict__
 comp_meas = ComplexityMeasurer(**comp_meas_kwargs)
 single_labels_entropy_by_class = {}
-methods = ['img_label','proc_time','total'] + [f'level{i}' for i in range(ARGS.num_layers)]
+methods = ['img_label','proc_time','total'] + [f'level {i+1}' for i in range(ARGS.num_layers)]
 if ARGS.run_other_methods:
     methods += ['glcm','no_mdl','fract','ent','jpg','mach','khan','redies','no_patch']
 results_df = pd.DataFrame(columns=methods,index=list(range(ARGS.num_ims))+['stds','means'])
@@ -92,7 +92,7 @@ for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.dow
     results_df.loc[idx,'proc_time'] = time()-img_start_time
     results_df.loc[idx,'total'] = sum(scores_at_each_level)
     for i,pe in enumerate(scores_at_each_level):
-        results_df.loc[idx,f'level{i}'] = pe
+        results_df.loc[idx,f'level {i+1}'] = pe
     if ARGS.run_other_methods:
         comp_meas.is_mdl_abl = True
         no_mdls, _, _ = comp_meas.interpret(im)
