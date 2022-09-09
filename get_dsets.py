@@ -102,7 +102,7 @@ class ImageStreamer():
         elif dset == 'stripes':
             self.line_thicknesses = np.random.permutation(np.arange(3,10))
 
-    def stream_images(self,num_ims,downsample,given_fname='none',given_class_dir='none'):
+    def stream_images(self,num_ims,downsample,given_fname='none',given_class_dir='none',select_randomly=False):
         if self.dset in ['cifar','mnist','usps']:
             indices = np.random.choice(len(self.prepared_dset),size=num_ims,replace=False)
         elif self.dset == 'dtd':
@@ -117,9 +117,13 @@ class ImageStreamer():
             if self.dset in ['im','dtd']:
                 if self.dset=='im':
                     num_classes = len(listdir(self.dset_dir))
-                    class_dir = given_class_dir if given_class_dir != 'none' else listdir(self.dset_dir)[i%num_classes]
-                    idx_within_class = i//num_classes
-                    fname = given_fname if given_fname != 'none' else listdir(join(self.dset_dir,class_dir))[idx_within_class]
+                    if select_randomly:
+                        class_dir = np.random.choice(listdir(self.dset_dir))
+                        fname = np.random.choice(listdir(join(self.dset_dir,class_dir)))
+                    else:
+                        class_dir = given_class_dir if given_class_dir != 'none' else listdir(self.dset_dir)[i%num_classes]
+                        idx_within_class = i//num_classes
+                        fname = given_fname if given_fname != 'none' else listdir(join(self.dset_dir,class_dir))[idx_within_class]
                     fpath = join(self.dset_dir,class_dir,fname)
                 elif self.dset=='dtd':
                     try:

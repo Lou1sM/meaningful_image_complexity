@@ -8,18 +8,20 @@ from dl_utils.tensor_funcs import numpyify, recursive_np_or
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture as GMM
+from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
+import skfuzzy as fuzz
 
 
 PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
     def __init__(self,verbose,ncs_to_check,n_cluster_inits,print_times,
                     display_cluster_label_imgs,compare_to_true_entropy,
-                    nz,alg_nz,display_scattered_clusters,
-                    subsample,patch_comb_method,num_layers,
+                    nz,alg_nz,display_scattered_clusters,cluster_model,
+                    subsample,patch_comb_method,num_layers,ass,
                     no_cluster_idxify,info_subsample,**kwargs):
 
         self.verbose = verbose
@@ -36,7 +38,9 @@ class ComplexityMeasurer():
         self.nz = nz
         self.alg_nz = alg_nz
         self.info_subsample = info_subsample
+        self.cluster_model = cluster_model
         self.is_mdl_abl = False
+        self.complexity_func = labels_ass_idx if ass else labels_entropy
 
     def interpret(self,given_x):
         img_start_time = time()
@@ -56,8 +60,7 @@ class ComplexityMeasurer():
                 all_single_labels_ass_idxs += [0]*pad_len
                 all_patch_entropys += [0]*pad_len
                 break
-            #single_labels_ass_idx = labels_entropy(self.best_cluster_labels.flatten())
-            single_labels_ass_idx = labels_ass_idx(self.best_cluster_labels.flatten())
+            single_labels_ass_idx = self.complexity_func(self.best_cluster_labels.flatten())
             if self.print_times:
                 print(f'mdl_cluster time: {time()-cluster_start_time:.2f}')
             total_num_clusters += num_clusters_at_this_level
@@ -91,7 +94,7 @@ class ComplexityMeasurer():
         sx = sorted(x.flatten())
         increments = [sx2-sx1 for sx1,sx2 in zip(sx[:-1],sx[1:])]
         self.prec = min([item for item in increments if item != 0])
-        print(f'Setting set_smallest_increment to {self.prec}')
+        #print(f'Setting set_smallest_increment to {self.prec}')
 
     def project_clusters(self):
         prev_clabs_as_img = np.expand_dims(self.best_cluster_labels,2)
@@ -158,21 +161,36 @@ class ComplexityMeasurer():
 
     def cluster(self,x,nc):
         N = len(x)
-        self.model = GMM(nc,n_init=self.n_cluster_inits,covariance_type='diag')
-        while True:
-            try:
-                self.cluster_labels = self.model.fit_predict(x)
-                break
-            except ValueError:
-                print(f'failed to cluster with {nc} components, and reg_covar {self.model.reg_covar}')
-                self.model.reg_covar *= 10
-                print(f'trying again with reg_covar {self.model.reg_covar}')
-        found_nc = len(np.unique(self.cluster_labels))
-        if nc > 1 and self.display_scattered_clusters:
-            scatter_clusters(x,self.best_cluster_labels.flatten(),show=True)
-        self.model_len = nc*(self.len_of_each_cluster)
-        new_model_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
-        neg_log_probs = new_model_scores * np.log2(np.e)
+        if self.cluster_model == 'cmeans':
+            fuzzy_cluster_results = fuzz.cluster.cmeans(np.transpose(x),nc,m=2,error=.005,maxiter=1000)
+            neg_log_probs = -np.log2(fuzzy_cluster_results[1].max(axis=0))
+            self.cluster_labels = fuzzy_cluster_results[1].argmax(axis=0)
+            self.model_len = 0.5 * nc * self.len_of_each_cluster
+            found_nc = nc
+        elif self.cluster_model == 'kmeans':
+            self.model_len = 0.5 * nc * self.len_of_each_cluster
+            found_nc = nc
+            self.cluster_labels = KMeans(nc).fit_predict(x)
+            sizes_of_each_cluster = [x[self.cluster_labels==i].max(axis=0)-x[self.cluster_labels==i].min(axis=0) for i in range(nc)]
+            neg_log_prob_per_cluster = np.array([np.log2(dr).sum() for dr in sizes_of_each_cluster])
+            neg_log_probs = neg_log_prob_per_cluster[self.cluster_labels]
+            print(np.bincount(self.cluster_labels))
+        else:
+            self.model = GMM(nc,n_init=self.n_cluster_inits,covariance_type='diag')
+            while True:
+                try:
+                    self.cluster_labels = self.model.fit_predict(x)
+                    break
+                except ValueError:
+                    print(f'failed to cluster with {nc} components, and reg_covar {self.model.reg_covar}')
+                    self.model.reg_covar *= 10
+                    print(f'trying again with reg_covar {self.model.reg_covar}')
+            found_nc = len(np.unique(self.cluster_labels))
+            if nc > 1 and self.display_scattered_clusters:
+                scatter_clusters(x,self.best_cluster_labels.flatten(),show=True)
+            self.model_len = nc*(self.len_of_each_cluster)
+            new_model_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
+            neg_log_probs = new_model_scores * np.log2(np.e)
         self.outliers = neg_log_probs > self.len_of_outlier
         self.len_outliers = (self.len_of_outlier * self.outliers).sum()
         self.idxs_len_per_cluster = np.log2(N) - np.log2(np.bincount(self.cluster_labels))
@@ -215,7 +233,7 @@ class ComplexityMeasurer():
         if self.verbose:
             print(f'{len(flattened)} labels of {len(y)} distinct values')
         tuples_as_idxs = np.array([y.index(tuple(z)) for z in to_use])
-        return labels_ass_idx(tuples_as_idxs)
+        return self.complexity_func(tuples_as_idxs)
 
 def labels_ass_idx(labels: np.array):
     assert labels.ndim == 1

@@ -15,6 +15,7 @@ from skimage.measure import shannon_entropy
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--alg_nz',type=str,choices=['pca','umap','tsne'],default='pca')
+parser.add_argument('--ass',action='store_true')
 parser.add_argument('--no_cluster_idxify',action='store_true')
 parser.add_argument('--compare_to_true_entropy',action='store_true')
 parser.add_argument('--display_cluster_label_imgs',action='store_true')
@@ -40,8 +41,10 @@ parser.add_argument('--patch_comb_method',type=str,choices=['sum','concat','or']
 parser.add_argument('--print_times',action='store_true')
 parser.add_argument('--rand_dpoint',action='store_true')
 parser.add_argument('--run_other_methods',action='store_true')
+parser.add_argument('--select_randomly',action='store_true')
 parser.add_argument('--show_df',action='store_true')
 parser.add_argument('--subsample',type=float,default=1)
+parser.add_argument('--cluster_model',type=str,choices=['kmeans','cmeans','GMM'],default='GMM')
 parser.add_argument('--verbose','-v',action='store_true')
 ARGS = parser.parse_args()
 
@@ -65,7 +68,7 @@ img_start_times = []
 img_times_real = []
 labels = []
 img_streamer = ImageStreamer(ARGS.dset,~ARGS.no_resize)
-for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.downsample,ARGS.given_fname,ARGS.given_class_dir)):
+for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.downsample,ARGS.given_fname,ARGS.given_class_dir,ARGS.select_randomly)):
     img_label = label.split('_')[0] if ARGS.dset in ['im','dtd'] else label
     print(idx, img_label)
     plt.axis('off')
