@@ -14,6 +14,7 @@ from skimage.measure import shannon_entropy
 
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--abls_only',action='store_true')
 parser.add_argument('--alg_nz',type=str,choices=['pca','umap','tsne'],default='pca')
 parser.add_argument('--ass',action='store_true')
 parser.add_argument('--no_cluster_idxify',action='store_true')
@@ -41,12 +42,16 @@ parser.add_argument('--patch_comb_method',type=str,choices=['sum','concat','or']
 parser.add_argument('--print_times',action='store_true')
 parser.add_argument('--rand_dpoint',action='store_true')
 parser.add_argument('--run_other_methods',action='store_true')
+parser.add_argument('--save_last',action='store_true')
 parser.add_argument('--select_randomly',action='store_true')
 parser.add_argument('--show_df',action='store_true')
 parser.add_argument('--subsample',type=float,default=1)
 parser.add_argument('--cluster_model',type=str,choices=['kmeans','cmeans','GMM'],default='GMM')
 parser.add_argument('--verbose','-v',action='store_true')
 ARGS = parser.parse_args()
+
+if ARGS.abls_only:
+    ARGS.run_other_methods = True
 
 exp_dir = f'experiments/{ARGS.exp_name}/{ARGS.dset}'
 if (isfile(join(exp_dir,f'{ARGS.dset}_results.csv')) and
@@ -72,7 +77,8 @@ for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.dow
     img_label = label.split('_')[0] if ARGS.dset in ['im','dtd'] else label
     print(idx, img_label)
     plt.axis('off')
-    plt.imshow(im); plt.savefig('image_just_used.png')
+    if ARGS.save_last:
+        plt.imshow(im); plt.savefig('image_just_used.png')
     if ARGS.gaussian_noisify > 0:
         noise = np.random.randn(*im.shape)
         im += ARGS.gaussian_noisify*noise
@@ -90,7 +96,10 @@ for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.dow
         no_mdls = [0]
     img_start_time = time()
     comp_meas.is_mdl_abl = False
-    scores_at_each_level, ncs, new_single_labels_entropys = comp_meas.interpret(im)
+    if ARGS.abls_only:
+        scores_at_each_level, ncs, new_single_labels_entropys = [-np.ones(ARGS.num_layers)]*3
+    else:
+        scores_at_each_level, ncs, new_single_labels_entropys = comp_meas.interpret(im)
     results_df.loc[idx,'img_label'] = img_label
     results_df.loc[idx,'proc_time'] = time()-img_start_time
     results_df.loc[idx,'total'] = sum(scores_at_each_level)
