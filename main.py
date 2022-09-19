@@ -102,6 +102,7 @@ for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.dow
         scores_at_each_level, ncs, new_single_labels_entropys = comp_meas.interpret(im)
     results_df.loc[idx,'img_label'] = img_label
     results_df.loc[idx,'proc_time'] = time()-img_start_time
+    results_df.loc[idx,'no_patch'] = sum(new_single_labels_entropys)
     results_df.loc[idx,'total'] = sum(scores_at_each_level)
     for i,pe in enumerate(scores_at_each_level):
         results_df.loc[idx,f'level {i+1}'] = pe
@@ -109,7 +110,6 @@ for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.dow
         comp_meas.is_mdl_abl = True
         no_mdls, _, _ = comp_meas.interpret(im)
         results_df.loc[idx,'no_mdl'] = sum(no_mdls)
-        results_df.loc[idx,'no_patch'] = sum(new_single_labels_entropys)
         greyscale_im = rgb2gray(im)
         results_df.loc[idx,'fract'] = compute_fractal_dimension(greyscale_im)
         im_unint8 = (greyscale_im*255).astype(np.uint8)
