@@ -145,7 +145,7 @@ class ComplexityMeasurer():
                         f'Err: {self.residuals/N:.3f}\t'
                         f'Idxs: {self.idxs_len/N:.3f}\t'
                         f'O: {self.outliers.sum()} {self.len_outliers/N:.3f}\t'))
-            if self.dl < best_dl:
+            if self.dl < best_dl or self.is_mdl_abl:
                 best_dl = self.dl
                 best_nc = nc
                 self.best_cluster_labels = self.cluster_labels.reshape(*x_as_img.shape[:-1])
