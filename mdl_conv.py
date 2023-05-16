@@ -1,4 +1,6 @@
-from scipy.special import softmax
+from scipy.special import softmax,logsumexp
+import sys
+from copy import copy
 from time import time
 from scipy.stats import entropy
 from matplotlib.colors import BASE_COLORS
@@ -11,6 +13,7 @@ from sklearn.mixture import GaussianMixture as GMM
 from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy import log,log2,exp
 import torch
 import torch.nn as nn
 import skfuzzy as fuzz
@@ -48,11 +51,13 @@ class ComplexityMeasurer():
         total_num_clusters = 0
         all_single_labels_ass_idxs = []
         all_patch_entropys = []
+        all_nums_clusters = []
         self.set_smallest_increment(x)
         for layer_being_processed in range(self.num_layers):
             self.layer_being_processed = layer_being_processed
             cluster_start_time = time()
             num_clusters_at_this_level, dl = self.mdl_cluster(x)
+            all_nums_clusters.append(num_clusters_at_this_level)
             if self.display_cluster_label_imgs:
                 self.viz_cluster_labels()
             if num_clusters_at_this_level <= 1:
@@ -86,9 +91,11 @@ class ComplexityMeasurer():
                 print(f'time to compute entropy: {time()-info_start_time:.2f}')
             all_patch_entropys.append(patch_entropy)
             print(f'{layer_being_processed}: single ent: {single_labels_ass_idx}, patch_ent: {patch_entropy}')
+            if sum([x==8 for x in all_nums_clusters]) == 2:
+                break
         if self.print_times:
             print(f'image time: {time()-img_start_time:.2f}')
-        return all_patch_entropys, total_num_clusters, all_single_labels_ass_idxs
+        return all_patch_entropys, all_nums_clusters, all_single_labels_ass_idxs
 
     def set_smallest_increment(self,x):
         sx = sorted(x.flatten())
@@ -129,8 +136,8 @@ class ComplexityMeasurer():
                 print(f'dim red time: {time()-dim_red_start_time:.2f}')
         N,nz = x.shape
         data_range = x.max() - x.min()
-        self.len_of_each_cluster = 2 * nz * (np.log2(data_range) + 32) # Float precision
-        self.len_of_outlier = nz * np.log2(data_range)
+        self.len_of_each_cluster = 2 * nz * (log2(data_range) + 32) # Float precision
+        self.len_of_outlier = nz * log2(data_range) #No float prec. cuz will have that either way
         best_dl = N*self.len_of_outlier # Could call everything an outlier and have no clusters
         best_nc = 0
         nc_start_times = []
@@ -163,7 +170,7 @@ class ComplexityMeasurer():
         N = len(x)
         if self.cluster_model == 'cmeans':
             fuzzy_cluster_results = fuzz.cluster.cmeans(np.transpose(x),nc,m=2,error=.005,maxiter=1000)
-            neg_log_probs = -np.log2(fuzzy_cluster_results[1].max(axis=0))
+            neg_log_probs = -log2(fuzzy_cluster_results[1].max(axis=0))
             self.cluster_labels = fuzzy_cluster_results[1].argmax(axis=0)
             self.model_len = 0.5 * nc * self.len_of_each_cluster
             found_nc = nc
@@ -172,7 +179,7 @@ class ComplexityMeasurer():
             found_nc = nc
             self.cluster_labels = KMeans(nc).fit_predict(x)
             sizes_of_each_cluster = [x[self.cluster_labels==i].max(axis=0)-x[self.cluster_labels==i].min(axis=0) for i in range(nc)]
-            neg_log_prob_per_cluster = np.array([np.log2(dr).sum() for dr in sizes_of_each_cluster])
+            neg_log_prob_per_cluster = np.array([log2(dr).sum() for dr in sizes_of_each_cluster])
             neg_log_probs = neg_log_prob_per_cluster[self.cluster_labels]
             print(np.bincount(self.cluster_labels))
         else:
@@ -190,10 +197,10 @@ class ComplexityMeasurer():
                 scatter_clusters(x,self.best_cluster_labels.flatten(),show=True)
             self.model_len = nc*(self.len_of_each_cluster)
             new_model_scores = -self.model._estimate_log_prob(x)[np.arange(len(x)),self.cluster_labels]
-            neg_log_probs = new_model_scores * np.log2(np.e)
+            neg_log_probs = new_model_scores * log2(np.e)
         self.outliers = neg_log_probs > self.len_of_outlier
         self.len_outliers = (self.len_of_outlier * self.outliers).sum()
-        self.idxs_len_per_cluster = np.log2(N) - np.log2(np.bincount(self.cluster_labels))
+        self.idxs_len_per_cluster = log2(N) - log2(np.bincount(self.cluster_labels))
         self.idxs_len = self.idxs_len_per_cluster[self.cluster_labels][~self.outliers].sum()
         self.residuals = (neg_log_probs * ~self.outliers).sum()
         self.dl = self.residuals + self.len_outliers + self.idxs_len + self.model_len
@@ -204,7 +211,9 @@ class ComplexityMeasurer():
         pallete = PALETTE[:nc]
         coloured_clabs = np.array(pallete)[self.best_cluster_labels]
         coloured_clabs = np.resize(coloured_clabs,(*self.best_cluster_labels.shape,3))
-        plt.imshow(coloured_clabs); plt.show()
+        plt.imshow(coloured_clabs)
+        plt.savefig('segmentation_by_clusters.png',bbox_inches=0)
+        plt.show()
 
     def apply_conv_layer(self,x,layer_num='none',custom_cnvl='none'):
         assert (layer_num == 'none') ^ (custom_cnvl == 'none')
@@ -238,7 +247,7 @@ class ComplexityMeasurer():
 def labels_ass_idx(labels: np.array):
     assert labels.ndim == 1
     bin_counts = np.bincount(labels.flatten())
-    return np.log(bin_counts).sum() / bin_counts.sum()
+    return log(bin_counts).sum() / bin_counts.sum()
 
 def labels_entropy(labels: np.array):
     assert labels.ndim == 1
@@ -249,8 +258,8 @@ def info_in_label_counts(labels):
     assert labels.ndim == 1
     N = len(labels)
     counts = np.bincount(labels)
-    log_counts = np.log2(counts)
-    return N*np.log2(N) - np.dot(counts,log_counts)
+    log_counts = log2(counts)
+    return N*log2(N) - np.dot(counts,log_counts)
 
 def make_dummy_layer(ks,stride,padding):
     cnvl = nn.Conv2d(1,1,ks,stride,padding=padding,padding_mode='replicate')
@@ -287,5 +296,5 @@ def torch_min(t,val):
 
 def sum_logs(labels):
     counts = np.bincount(labels)
-    log_counts = np.log2(counts)
+    log_counts = log2(counts)
     return log_counts.sum()
