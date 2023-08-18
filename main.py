@@ -67,7 +67,8 @@ single_labels_entropy_by_class = {}
 methods = ['img_label','proc_time','total'] + [f'level {i+1}' for i in range(ARGS.num_layers)]
 if ARGS.run_other_methods:
     methods += ['glcm','no_mdl','fract','ent','jpg','mach','khan','redies','no_patch']
-results_df = pd.DataFrame(columns=methods,index=list(range(ARGS.num_ims))+['stds','means'])
+#results_df = pd.DataFrame(columns=methods,index=list(range(ARGS.num_ims))+['stds','means'])
+results_df = pd.DataFrame(columns=methods)
 
 img_start_times = []
 img_times_real = []
@@ -121,6 +122,8 @@ for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.dow
         results_df.loc[idx,'redies'] = redies2012(im)
     labels.append(label)
 
+results_df.index = results_df['img_label']
+results_df = results_df.drop('img_label',axis=1)
 stds = results_df.std(axis=0)
 means = results_df.mean(axis=0)
 results_df.loc['stds'] = stds
@@ -132,4 +135,4 @@ with open(join(exp_dir,f'{ARGS.dset}_ARGS.txt'),'w') as f:
            f.write(f'{a}: {getattr(ARGS,a)}'+ '\n')
 if ARGS.show_df:
     print(results_df)
-print(results_df.loc['means'].drop('img_label'))
+print(results_df.loc['means'])

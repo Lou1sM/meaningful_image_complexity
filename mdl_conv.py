@@ -14,8 +14,6 @@ from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy import log,log2,exp
-import torch
-import torch.nn as nn
 import skfuzzy as fuzz
 
 
@@ -91,8 +89,6 @@ class ComplexityMeasurer():
                 print(f'time to compute entropy: {time()-info_start_time:.2f}')
             all_patch_entropys.append(patch_entropy)
             print(f'{layer_being_processed}: single ent: {single_labels_ass_idx}, patch_ent: {patch_entropy}')
-            if sum([x==8 for x in all_nums_clusters]) == 2:
-                break
         if self.print_times:
             print(f'image time: {time()-img_start_time:.2f}')
         return all_patch_entropys, all_nums_clusters, all_single_labels_ass_idxs
@@ -102,16 +98,6 @@ class ComplexityMeasurer():
         increments = [sx2-sx1 for sx1,sx2 in zip(sx[:-1],sx[1:])]
         self.prec = min([item for item in increments if item != 0])
         #print(f'Setting set_smallest_increment to {self.prec}')
-
-    def project_clusters(self):
-        prev_clabs_as_img = np.expand_dims(self.best_cluster_labels,2)
-        if self.layer_being_processed==2:
-            proj_clusters_as_img = prev_clabs_as_img
-        elif self.layer_being_processed==1:
-            proj_clusters_as_img = self.apply_conv_layer(prev_clabs_as_img,custom_cnvl=self.dummy_initial_layer)
-        else:
-            proj_clusters_as_img = self.apply_conv_layer(prev_clabs_as_img,custom_cnvl=self.dummy_downsample_rlayer)
-        return proj_clusters_as_img.flatten().round().astype(int)
 
     def mdl_cluster(self,x_as_img,fixed_nc=-1):
         full_x = x_as_img
@@ -215,19 +201,6 @@ class ComplexityMeasurer():
         plt.savefig('segmentation_by_clusters.png',bbox_inches=0)
         plt.show()
 
-    def apply_conv_layer(self,x,layer_num='none',custom_cnvl='none'):
-        assert (layer_num == 'none') ^ (custom_cnvl == 'none')
-        try:
-            torch_x = torch.tensor(x).transpose(0,2).float().cuda()
-            if torch_x.ndim == 3:
-                torch_x = torch_x.unsqueeze(0)
-            layer_to_apply = self.layers[layer_num].cuda() if custom_cnvl == 'none' else custom_cnvl
-            torch_x = layer_to_apply(torch_x)
-            return numpyify(torch_x.squeeze(0).transpose(0,2))
-        except Exception as e:
-            print(e)
-            breakpoint()
-
     def info_in_patches(self,patched_im,subsample):
         assert patched_im.ndim == 3
         nc = patched_im.shape[2]
@@ -261,11 +234,6 @@ def info_in_label_counts(labels):
     log_counts = log2(counts)
     return N*log2(N) - np.dot(counts,log_counts)
 
-def make_dummy_layer(ks,stride,padding):
-    cnvl = nn.Conv2d(1,1,ks,stride,padding=padding,padding_mode='replicate')
-    cnvl.weight.data=torch.ones_like(cnvl.weight).requires_grad_(False)/(ks**2)
-    return cnvl
-
 def viz_proc_im(x):
     plt.imshow(x.sum(axis=2)); plt.show()
 
@@ -289,10 +257,6 @@ def patch_averages(a):
         breakpoint()
     summed = padded[:-1,:-1] + padded[:-1,1:] + padded[1:,:-1] + padded[1:,1:]
     return (summed/4)[1:-1,1:-1]
-
-def torch_min(t,val):
-    """return the minimum of val (float) and t (tensor), with val broadcast"""
-    return torch.minimum(t,val*torch.ones_like(t))
 
 def sum_logs(labels):
     counts = np.bincount(labels)
