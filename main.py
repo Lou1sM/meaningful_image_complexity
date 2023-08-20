@@ -1,9 +1,8 @@
 import argparse
-from utils import append_or_add_key, results_dict_to_df, make_alls_df
 import pandas as pd
 from time import time
 import numpy as np
-from mdl_conv import ComplexityMeasurer
+from measure_complexity import ComplexityMeasurer
 from get_dsets import ImageStreamer
 import matplotlib.pyplot as plt
 from os.path import join,isfile
@@ -15,37 +14,31 @@ from skimage.measure import shannon_entropy
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--abls_only',action='store_true')
-parser.add_argument('--alg_nz',type=str,choices=['pca','umap','tsne'],default='pca')
-parser.add_argument('--ass',action='store_true')
-parser.add_argument('--no_cluster_idxify',action='store_true')
-parser.add_argument('--compare_to_true_entropy',action='store_true')
+parser.add_argument('--ass',action='store_true',help='use assembly index instead of entropy of labels')
+parser.add_argument('--no_cluster_idxify',action='store_true', help="don't replace patches with cluster idxs")
+parser.add_argument('--compare_to_true_entropy',action='store_true',help='compare subsampled entropy to full entropy, just use to see how small a subsample is reasonable')
 parser.add_argument('--display_cluster_label_imgs',action='store_true')
 parser.add_argument('--display_input_imgs',action='store_true')
 parser.add_argument('--display_scattered_clusters',action='store_true')
 parser.add_argument('-d','--dset',type=str,choices=['im','cifar','mnist','rand','dtd','stripes','halves','fractal_imgs'],default='stripes')
-parser.add_argument('--downsample',type=int,default=-1)
-parser.add_argument('--exp_name',type=str,default='jim')
+parser.add_argument('--downsample',type=int,default=-1,help='lower resolution of input images, -1 means no downsampling')
+parser.add_argument('--exp_name',type=str,default='tmp')
 parser.add_argument('--given_fname',type=str,default='none')
 parser.add_argument('--given_class_dir',type=str,default='none')
-parser.add_argument('--include_mdl_abl',action='store_true')
-parser.add_argument('--info_subsample',type=float,default=1)
-parser.add_argument('--gaussian_noisify',type=float,default=0.)
-parser.add_argument('--is_choose_model_per_dpoint',action='store_true')
-parser.add_argument('--n_cluster_inits',type=int,default=1)
-parser.add_argument('--ncs_to_check',type=int,default=2)
-parser.add_argument('--no_resize',action='store_true')
-parser.add_argument('--num_ims',type=int,default=1)
-parser.add_argument('--num_layers',type=int,default=4)
-parser.add_argument('--nz',type=int,default=2)
-parser.add_argument('--overwrite',action='store_true')
-parser.add_argument('--patch_comb_method',type=str,choices=['sum','concat','or'],default='sum')
+parser.add_argument('--include_mdl_abl',action='store_true',help='include ablation setting where mdl is not used and nc is set to 5 instead')
+parser.add_argument('--info_subsample',type=float,default=1,help='fraction of labels to use for computing entropy, using <1 speeds up computation and generally causes little error when > 0.3')
+parser.add_argument('--gaussian_noisify',type=float,default=0.,help='add some fraction of gaussian noise to the input image')
+parser.add_argument('--n_cluster_inits',type=int,default=1,help='passed to the clustering model training')
+parser.add_argument('--ncs_to_check',type=int,default=2,help='range of values of K to select from using mdl')
+parser.add_argument('--no_resize',action='store_true',help="don't resize the input images")
+parser.add_argument('--num_ims','-n',type=int,default=1)
+parser.add_argument('--num_levels',type=int,default=4,help="how many scales to evaluate complexity at")
+parser.add_argument('--nz',type=int,default=2, help='dimension to reduce to before clustering')
+parser.add_argument('--overwrite',action='store_true', help='overwrite experiment of the same name if it exists')
 parser.add_argument('--print_times',action='store_true')
-parser.add_argument('--rand_dpoint',action='store_true')
-parser.add_argument('--run_other_methods',action='store_true')
-parser.add_argument('--save_last',action='store_true')
-parser.add_argument('--select_randomly',action='store_true')
-parser.add_argument('--show_df',action='store_true')
-parser.add_argument('--subsample',type=float,default=1)
+parser.add_argument('--run_other_methods',action='store_true', help='also compute complexity scores from existing methods')
+parser.add_argument('--select_randomly',action='store_true', help='shuffle the dataset before looping through')
+parser.add_argument('--show_df',action='store_true', help='print the results as a pandas dataframe to stdout')
 parser.add_argument('--cluster_model',type=str,choices=['kmeans','cmeans','GMM'],default='GMM')
 parser.add_argument('--verbose','-v',action='store_true')
 ARGS = parser.parse_args()
@@ -55,31 +48,42 @@ if ARGS.abls_only:
 
 exp_dir = f'experiments/{ARGS.exp_name}/{ARGS.dset}'
 if (isfile(join(exp_dir,f'{ARGS.dset}_results.csv')) and
-    not ARGS.exp_name.endswith('jim') and not ARGS.overwrite):
+    not ARGS.exp_name.endswith('tmp') and not ARGS.overwrite):
     is_overwrite = get_user_yesno_answer(f'experiment {ARGS.exp_name}/{ARGS.dset} already exists, overwrite?')
     if not is_overwrite:
         print('aborting')
         sys.exit()
+
 check_dir(exp_dir)
-comp_meas_kwargs = ARGS.__dict__
-comp_meas = ComplexityMeasurer(**comp_meas_kwargs)
-single_labels_entropy_by_class = {}
-methods = ['img_label','proc_time','total'] + [f'level {i+1}' for i in range(ARGS.num_layers)]
+comp_meas = ComplexityMeasurer(ncs_to_check=ARGS.ncs_to_check,
+                               n_cluster_inits=ARGS.n_cluster_inits,
+                               nz=ARGS.nz,
+                               num_levels=ARGS.num_levels,
+                               cluster_model=ARGS.cluster_model,
+                               no_cluster_idxify=ARGS.no_cluster_idxify,
+                               compare_to_true_entropy=ARGS.compare_to_true_entropy,
+                               info_subsample=ARGS.info_subsample,
+                               print_times=ARGS.print_times,
+                               display_cluster_label_imgs=ARGS.display_cluster_label_imgs,
+                               display_scattered_clusters=ARGS.display_scattered_clusters,
+                               verbose=ARGS.verbose)
+
+methods = ['img_label','proc_time','total'] + [f'level {i+1}' for i in range(ARGS.num_levels)]
 if ARGS.run_other_methods:
     methods += ['glcm','no_mdl','fract','ent','jpg','mach','khan','redies','no_patch']
-#results_df = pd.DataFrame(columns=methods,index=list(range(ARGS.num_ims))+['stds','means'])
 results_df = pd.DataFrame(columns=methods)
 
 img_start_times = []
 img_times_real = []
 labels = []
 img_streamer = ImageStreamer(ARGS.dset,~ARGS.no_resize)
-for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.downsample,ARGS.given_fname,ARGS.given_class_dir,ARGS.select_randomly)):
+image_generator = img_streamer.stream_images(ARGS.num_ims,ARGS.downsample,ARGS.given_fname,
+                                            ARGS.given_class_dir,ARGS.select_randomly)
+
+for idx,(im,label) in enumerate(image_generator):
     img_label = label.split('_')[0] if ARGS.dset in ['im','dtd'] else label
     print(idx, img_label)
     plt.axis('off')
-    if ARGS.save_last:
-        plt.imshow(im); plt.savefig('image_just_used.png')
     if ARGS.gaussian_noisify > 0:
         noise = np.random.randn(*im.shape)
         im += ARGS.gaussian_noisify*noise
@@ -96,9 +100,8 @@ for idx,(im,label) in enumerate(img_streamer.stream_images(ARGS.num_ims,ARGS.dow
     else:
         no_mdls = [0]
     img_start_time = time()
-    comp_meas.is_mdl_abl = False
     if ARGS.abls_only:
-        scores_at_each_level, ncs, new_single_labels_entropys = [-np.ones(ARGS.num_layers)]*3
+        scores_at_each_level, ncs, new_single_labels_entropys = [-np.ones(ARGS.num_levels)]*3
     else:
         scores_at_each_level, ncs, new_single_labels_entropys = comp_meas.interpret(im)
     results_df.loc[idx,'img_label'] = img_label
@@ -129,10 +132,12 @@ means = results_df.mean(axis=0)
 results_df.loc['stds'] = stds
 results_df.loc['means'] = means
 results_df.to_csv(join(exp_dir,f'{ARGS.dset}_results.csv'))
+
 with open(join(exp_dir,f'{ARGS.dset}_ARGS.txt'),'w') as f:
     for a in dir(ARGS):
         if not a.startswith('_'):
-           f.write(f'{a}: {getattr(ARGS,a)}'+ '\n')
+            f.write(f'{a}: {getattr(ARGS,a)}'+ '\n')
+
 if ARGS.show_df:
     print(results_df)
 print(results_df.loc['means'])
