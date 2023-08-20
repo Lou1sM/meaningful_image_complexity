@@ -36,27 +36,21 @@ class ComplexityMeasurer():
         img_start_time = time()
         x = np.copy(given_x)
         total_num_clusters = 0
-        all_single_labels_ass_idxs = []
         all_patch_entropys = []
-        all_nums_clusters = []
         self.set_smallest_increment(x)
         for layer_being_processed in range(self.num_levels):
             self.layer_being_processed = layer_being_processed
             cluster_start_time = time()
             num_clusters_at_this_level, dl = self.mdl_cluster(x)
-            all_nums_clusters.append(num_clusters_at_this_level)
             if self.display_cluster_label_imgs:
                 self.viz_cluster_labels()
             if num_clusters_at_this_level <= 1:
                 pad_len = self.num_levels - len(all_patch_entropys)
-                all_single_labels_ass_idxs += [0]*pad_len
                 all_patch_entropys += [0]*pad_len
                 break
-            single_labels_ass_idx = labels_entropy(self.best_cluster_labels.flatten())
             if self.print_times:
                 print(f'mdl_cluster time: {time()-cluster_start_time:.2f}')
             total_num_clusters += num_clusters_at_this_level
-            all_single_labels_ass_idxs.append(single_labels_ass_idx)
             bool_ims_by_c = [(self.best_cluster_labels==c)
                             for c in np.unique(self.best_cluster_labels)]
             one_hot_im = np.stack(bool_ims_by_c, axis=2)
@@ -77,16 +71,15 @@ class ComplexityMeasurer():
             if self.print_times:
                 print(f'time to compute entropy: {time()-info_start_time:.2f}')
             all_patch_entropys.append(patch_entropy)
-            print(f'{layer_being_processed}: single ent: {single_labels_ass_idx}, patch_ent: {patch_entropy}')
+            print(f'complexity at level {layer_being_processed}: {patch_entropy:.3f}')
         if self.print_times:
             print(f'image time: {time()-img_start_time:.2f}')
-        return all_patch_entropys, all_nums_clusters, all_single_labels_ass_idxs
+        return all_patch_entropys
 
     def set_smallest_increment(self, x):
         sx = sorted(x.flatten())
         increments = [sx2-sx1 for sx1, sx2 in zip(sx[:-1], sx[1:])]
         self.prec = min([item for item in increments if item != 0])
-        #print(f'Setting set_smallest_increment to {self.prec}')
 
     def mdl_cluster(self, x_as_img, fixed_nc=-1):
         x = x_as_img.reshape(-1, x_as_img.shape[-1])
