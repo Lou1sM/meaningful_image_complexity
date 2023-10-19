@@ -99,6 +99,8 @@ class ImageStreamer():
             self.prepared_dset = list(zip(imgs,labels))
         elif dset == 'rand':
             self.prepared_dset = np.random.rand(1000,224,224,3)
+        elif dset == 'bitrand':
+            self.prepared_dset = (np.random.rand(1000,224,224,3) > 0.5).astype(float)
         elif dset == 'stripes':
             self.line_thicknesses = np.random.permutation(np.arange(3,10))
 
@@ -146,9 +148,9 @@ class ImageStreamer():
                 slope = np.random.rand()+.5
                 im = create_simple_img('halves',slope,-1)
                 label = 'halves'
-            elif self.dset == 'rand':
+            elif self.dset in['rand', 'bitrand']:
                 im = self.prepared_dset[i]
-                label = 'rand'
+                label = self.dset
             elif self.dset == 'fractal_imgs':
                 fname = listdir('fractal_imgs')[i]
                 fpath = join('fractal_imgs',fname)
@@ -159,7 +161,7 @@ class ImageStreamer():
                 im = np.array(Image.fromarray(im).resize((224,224)))/255
             elif self.dset == 'mnist':
                 im,label = self.prepared_dset[i]
-                im = np.array(Image.fromarray(im).resize((224,224)))
+                #im = np.array(Image.fromarray(im).resize((224,224)))
                 im = np.tile(np.expand_dims(im,2),(1,1,3))
             else:
                 print("INVALID DSET NAME:", self.dset)

@@ -15,10 +15,11 @@ PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
     def __init__(self, ncs_to_check, verbose, n_cluster_inits, print_times,
                     display_cluster_label_imgs, compare_to_true_entropy,
-                    nz, display_scattered_clusters, cluster_model,
+                    nz, display_scattered_clusters, cluster_model,suppress_all_prints,
                     num_levels, no_cluster_idxify, info_subsample):
 
         self.verbose = verbose
+        self.suppress_all_prints = suppress_all_prints
         self.num_levels = num_levels
         self.print_times = print_times
         self.cluster_idxify = not no_cluster_idxify
@@ -33,6 +34,7 @@ class ComplexityMeasurer():
         self.is_mdl_abl = False
 
     def interpret(self, given_x):
+        self.is_large_im = np.prod(given_x.shape) > 1e4
         img_start_time = time()
         x = np.copy(given_x)
         total_num_clusters = 0
@@ -54,7 +56,10 @@ class ComplexityMeasurer():
             bool_ims_by_c = [(self.best_cluster_labels==c)
                             for c in np.unique(self.best_cluster_labels)]
             one_hot_im = np.stack(bool_ims_by_c, axis=2)
-            patch_size = 4*(2**layer_being_processed)
+            if self.is_large_im:
+                patch_size = 4*(2**layer_being_processed)
+            else:
+                patch_size = 2*(layer_being_processed+1)
             if self.verbose:
                 print(f'patch_size: {patch_size}')
             c_idx_patches = combine_patches(one_hot_im, patch_size)
@@ -71,7 +76,8 @@ class ComplexityMeasurer():
             if self.print_times:
                 print(f'time to compute entropy: {time()-info_start_time:.2f}')
             all_patch_entropys.append(patch_entropy)
-            print(f'complexity at level {layer_being_processed}: {patch_entropy:.3f}')
+            if not self.suppress_all_prints:
+                print(f'complexity at level {layer_being_processed}: {patch_entropy:.3f}')
         if self.print_times:
             print(f'image time: {time()-img_start_time:.2f}')
         return all_patch_entropys
@@ -106,7 +112,7 @@ class ComplexityMeasurer():
         for nc in ncs_to_check:
             nc_start_times.append(time())
             found_nc = self.cluster(x, nc)
-            if found_nc == nc-1:
+            if found_nc == nc-1 and not self.suppress_all_prints:
                 print(f"only found {nc-1} clusters when looking for {nc}, terminating here"); break
             if self.verbose:
                 print(( f'{nc} {self.dl/N:.3f}\tMod: {self.model_len/N:.3f}\t'
@@ -149,6 +155,8 @@ class ComplexityMeasurer():
                 except ValueError:
                     print(f'failed to cluster with {nc} components, and reg_covar {self.model.reg_covar}')
                     self.model.reg_covar *= 10
+                    if self.model.reg_covar > 10:
+                        breakpoint()
                     print(f'trying again with reg_covar {self.model.reg_covar}')
             found_nc = len(np.unique(self.cluster_labels))
             if nc > 1 and self.display_scattered_clusters:
@@ -210,11 +218,27 @@ def viz_proc_im(x):
     plt.imshow(x.sum(axis=2)); plt.show()
 
 def combine_patches(a, ps):
+    n_rows, n_cols = a.shape[:2]
+    #rows_to_shift = min(im_cols,ps)
+    #cols_to_shift = min(im_rows,ps)
+    #r = int(im_rows//cols_to_shift * cols_to_shift)
+    #c = int(im_cols//rows_to_shift * rows_to_shift)
+    #assert r - im_rows < ps
+    #assert c - im_cols < ps
+    #assert r>0
+    #assert c>0
+    #a = a_[:c,:r]
     comb_func = lambda x: sum([z.astype(float) for z in x])
-    row_shifts = [a[i:i-ps] for i in range(ps)]
-    row_combined = comb_func(row_shifts)
-    column_row_shifts = [row_combined[:, i:i-ps] for i in range(ps)]
-    return comb_func(column_row_shifts)
+    if n_rows > ps:
+        to_add_vertically = [a[i:i-ps] for i in range(ps)]
+        a = comb_func(to_add_vertically)
+    if n_cols > ps:
+        to_add_horizontally = [a[:,i:i-ps] for i in range(ps)]
+        a = comb_func(to_add_horizontally)
+    #print(a.shape, ps, rows_to_shift, cols_to_shift)
+    #print([x.shape for x in column_row_shifts])
+    #return comb_func(column_row_shifts)
+    return a
 
 def patch_averages(a):
     try:

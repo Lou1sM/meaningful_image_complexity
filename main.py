@@ -20,7 +20,7 @@ parser.add_argument('--compare_to_true_entropy',action='store_true',help='compar
 parser.add_argument('--display_cluster_label_imgs',action='store_true')
 parser.add_argument('--display_input_imgs',action='store_true')
 parser.add_argument('--display_scattered_clusters',action='store_true')
-parser.add_argument('-d','--dset',type=str,choices=['im','cifar','mnist','rand','dtd','stripes','halves','fractal_imgs'],default='stripes')
+parser.add_argument('-d','--dset',type=str,choices=['im','cifar','mnist','rand', 'bitrand','dtd','stripes','halves','fractal_imgs'],default='stripes')
 parser.add_argument('--downsample',type=int,default=-1,help='lower resolution of input images, -1 means no downsampling')
 parser.add_argument('--exp_name',type=str,default='tmp')
 parser.add_argument('--given_fname',type=str,default='none')
@@ -41,6 +41,7 @@ parser.add_argument('--select_randomly',action='store_true', help='shuffle the d
 parser.add_argument('--show_df',action='store_true', help='print the results as a pandas dataframe to stdout')
 parser.add_argument('--cluster_model',type=str,choices=['kmeans','cmeans','GMM'],default='GMM')
 parser.add_argument('--verbose','-v',action='store_true')
+parser.add_argument('--suppress_all_prints',action='store_true')
 ARGS = parser.parse_args()
 
 if ARGS.abls_only:
@@ -66,6 +67,7 @@ comp_meas = ComplexityMeasurer(ncs_to_check=ARGS.ncs_to_check,
                                print_times=ARGS.print_times,
                                display_cluster_label_imgs=ARGS.display_cluster_label_imgs,
                                display_scattered_clusters=ARGS.display_scattered_clusters,
+                               suppress_all_prints=ARGS.suppress_all_prints,
                                verbose=ARGS.verbose)
 
 methods = ['img_label','proc_time','total'] + [f'level {i+1}' for i in range(ARGS.num_levels)]
