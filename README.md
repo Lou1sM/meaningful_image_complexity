@@ -41,7 +41,7 @@ img = np.load(<path-to-img-file>)
 complexity_of_img_at_each_level = comp_meas.interpret(img)
 ```
 
-For questions or problems with the code, contact oneillml@tcd.ie.
+For questions or problems with the code, contact lmahonology@gmail.com.
 
 
 ## Citation
