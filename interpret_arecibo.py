@@ -8,7 +8,7 @@ from measure_complexity import ComplexityMeasurer
 
 
 comp_meas = ComplexityMeasurer(ncs_to_check=8,
-                               n_cluster_inits=10,
+                               n_cluster_inits=1,
                                nz=2,
                                num_levels=3,
                                cluster_model='GMM',
@@ -31,7 +31,8 @@ N = len(arecibo_signal)
 results = []
 rescale_each_axis_by = int(224 / (N**0.5)) # to give same n_pixels as a 224*224
 
-for w in range(1,int(N**.5)):
+#for w in range(1,int(N**.5)):
+for w in range(1,100):
     h = int(math.ceil(N/w))
     n_extra_bits_needed = w*h - N
     #scaled_h, scaled_w = h*rescale_each_axis_by, w*rescale_each_axis_by
@@ -53,14 +54,23 @@ for w in range(1,int(N**.5)):
     br_scores_at_each_level = comp_meas.interpret(bitrand_like)
     this_results = {f'level {i+1}':v for i,v in enumerate(scores_at_each_level)}
     total = sum(scores_at_each_level)
+    br_like_total = sum(br_scores_at_each_level)
     #print(f'arecibo: {total}\tbitrand: {sum(br_scores_at_each_level)}')
     #print(total)
     this_results['total'] = total
     this_results['height'] = h
     this_results['width'] = w
+    this_results['br_like'] = br_like_total
     results.append(this_results)
 
 
 results_df = pd.DataFrame(results)
+results_df.to_csv('arecibo_aspect_ratio_results.csv')
 print(results_df)
+plt.plot(results_df['width'],results_df['total'])
+plt.xlabel('Width (px)')
+plt.ylabel('Complexity Score')
+plt.title('Arecibo Message Complexity at Different Aspect Ratios')
+plt.savefig('complexity_vs_aspect_ratio.png')
+breakpoint()
 
