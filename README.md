@@ -20,21 +20,16 @@ The dataset name can be 'im' (imagenette2), 'cifar' (cifar10), 'mnist', 'stripes
 The class implementing the complexity metric can also be imported:
 
 ```
-from measure complexity import ComplexityMeasurer
+from measure_complexity import ComplexityMeasurer
 import numpy as np
 
-comp_meas = ComplexityMeasurer(ncs_to_check=8,                                           
-                               n_cluster_inits=1,                                     
+comp_meas = ComplexityMeasurer(ncs_to_check=8,
+                               n_cluster_inits=1,
                                nz=2,
                                num_levels=4,
-                               cluster_model=GMM,                                         
+                               cluster_model='GMM',
                                info_subsample=0.3,
-                               print_times=False,
-                               no_cluster_idxify=False,                                 
-                               compare_to_true_entropy=False,            
-                               display_cluster_label_imgs=False,               
-                               display_scattered_clusters=False,          
-                               verbose=False)
+                               )
 
 img = np.load(<path-to-img-file>)
 
