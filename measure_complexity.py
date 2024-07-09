@@ -8,15 +8,14 @@ from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy import log, log2
-import skfuzzy as fuzz
+#import skfuzzy as fuzz
 
 
 PALETTE = list(BASE_COLORS.values()) + [(0,0.5,1),(1,0.5,0)]
 class ComplexityMeasurer():
-    def __init__(self, ncs_to_check, verbose, n_cluster_inits, print_times,
-                    display_cluster_label_imgs, compare_to_true_entropy,
-                    nz, display_scattered_clusters, cluster_model,suppress_all_prints,
-                    num_levels, no_cluster_idxify, info_subsample):
+    def __init__(self, ncs_to_check, num_levels, n_cluster_inits, nz, cluster_model, info_subsample,
+                 print_times=False, verbose=False, display_cluster_label_imgs=False, compare_to_true_entropy=False,
+                 display_scattered_clusters=False, suppress_all_prints=False, no_cluster_idxify=False):
 
         self.verbose = verbose
         self.suppress_all_prints = suppress_all_prints
@@ -30,6 +29,7 @@ class ComplexityMeasurer():
         self.ncs_to_check = ncs_to_check
         self.nz = nz
         self.info_subsample = info_subsample
+        assert cluster_model in ['GMM', 'kmeans', 'cmeans'], f'unrecognized cluster model: {cluster_model}'
         self.cluster_model = cluster_model
         self.is_mdl_abl = False
 
