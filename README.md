@@ -43,12 +43,14 @@ For questions or problems with the code, contact lmahonology@gmail.com.
 If you use or refer to this work, please cite 
 ```
 @article{mahon2024minimum,
-  title={Minimum description length clustering to measure meaningful image complexity},
-  author={Mahon, Louis and Lukasiewicz, Thomas},
-  journal={Pattern Recognition},
-  volume={145},
-  pages={109889},
-  year={2024},
-  publisher={Elsevier}
+title = {Minimum description length clustering to measure meaningful image complexity},
+journal = {Pattern Recognition},
+volume = {145},
+pages = {109889},
+year = {2024},
+issn = {0031-3203},
+doi = {https://doi.org/10.1016/j.patcog.2023.109889},
+url = {https://www.sciencedirect.com/science/article/pii/S0031320323005873},
+author = {Louis Mahon and Thomas Lukasiewicz},
 }
 ```
