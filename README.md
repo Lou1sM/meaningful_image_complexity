@@ -1,5 +1,5 @@
 # Code for a method that measures the meaningful complexity of images
-Unlike various methods, like entropy of pixel values, which measure white noise as very complex, this method uses the minimum description length to measure only the amount of meaningful complexity. White noise images get a very low score.
+Unlike various methods, such as entropy of pixel values, which measure white noise as very complex, this method uses the minimum description length to measure only the amount of meaningful complexity. White noise images get a very low score.
 The method is described in this paper: https://www.sciencedirect.com/science/article/pii/S0031320323005873.
 
 ## To use
