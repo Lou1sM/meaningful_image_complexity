@@ -11,13 +11,7 @@ Run
 
 to install the required libraries.
 
-Then use the method by running
-
-`python main.py -d <dataset-name> --info_subsample 0.3 -n <number-of-images-to-test>`
-
-The dataset name can be 'im' (imagenette2), 'cifar' (cifar10), 'mnist', 'stripes' (simple dataset we created for testing), 'halves' (simple dataset we created for test), or 'rand' (random noise).
-
-The class implementing the complexity metric can also be imported:
+Then, to apply the metric to your own images, you can import the ComplexityMeasurer class as follows:
 
 ```
 from measure_complexity import ComplexityMeasurer
@@ -35,6 +29,14 @@ img = np.load(<path-to-img-file>)
 
 complexity_of_img_at_each_level = comp_meas.interpret(img)
 ```
+The result, `complexity_of_img_at_each_level`, will be a list of floats giving the complexity scores at each level of the input image. It will be of length 4 in this example, corresponding to the argument in initialising the class. The first element of the list is the score at the most local level, which picks out fine detail, the last element is the score at the most coarse-grained level, which picks out global structure. To get an overall score for the image, as in the paper, use `sum(complexity_of_img_at_each_level)`.
+
+If you want to reproduce the results in the paper, run
+
+`python main.py -d <dataset-name> --info_subsample 0.3 -n <number-of-images-to-test>`
+
+The dataset name can be 'im' (imagenette2), 'cifar' (cifar10), 'mnist', 'stripes' (simple dataset we created for testing), 'halves' (simple dataset we created for test), or 'rand' (random noise).
+
 
 For questions or problems with the code, contact lmahonology@gmail.com.
 
